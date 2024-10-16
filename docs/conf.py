@@ -25,14 +25,13 @@ release = '0.0.1'
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    'sphinx.ext.autodoc',    
+    'sphinx.ext.autodoc',
     'sphinx.ext.napoleon',
-    'sphinx.ext.viewcode',    
+    'sphinx.ext.viewcode',
 ]
 
 templates_path = ['_templates']
 exclude_patterns = ['docs', '_build', 'Thumbs.db', '.DS_Store', 'sandbox.py']
-
 
 
 # -- Options for HTML output -------------------------------------------------

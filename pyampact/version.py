@@ -5,8 +5,8 @@
 import sys
 import importlib
 
-short_version = "0.4"
-version = "0.4.14"
+short_version = "0.0"
+version = "0.0.1"
 
 
 def __get_mod_version(modname):
@@ -37,7 +37,6 @@ def show_versions() -> None:
         'librosa==0.10.0.post2',
         'setuptools>=48',
     ]
-    
 
     print("INSTALLED VERSIONS")
     print("------------------")

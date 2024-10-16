@@ -24,6 +24,8 @@ symbolicUtils
     remove_namespaces
     removeTied
     snapTo
+    truncate_and_scale_onsOffsList
+    githubURLtoRaw
 
 """
 
@@ -54,6 +56,7 @@ __all__ = [
     "remove_namespaces",
     "removeTied",
     "snapTo",
+    "truncate_and_scale_onsOffsList",
     "_duration2Kern",
     "duration2MEI",
     "function_pattern",
@@ -61,9 +64,11 @@ __all__ = [
     "tinyNotation_pattern",
     "volpiano_pattern",
     "meiDeclaration",
-    "idGen"    
+    "idGen",
+    "githubURLtoRaw"
 
 ]
+
 
 def _escape_cdata(text):
     """
@@ -98,7 +103,10 @@ def _escape_cdata(text):
             text = text.replace(">", "&gt;")
         return text
     except TypeError:
-        raise TypeError("cannot serialize %r (type %s)" % (text, type(text).__name__))
+        raise TypeError("cannot serialize %r (type %s)" %
+                        (text, type(text).__name__))
+
+
 ET._escape_cdata = _escape_cdata
 
 _duration2Kern = {  # keys get rounded to 5 decimal places
@@ -211,8 +219,9 @@ def addMEINote(note, parent, syl=None):
     Returns:
     xml.etree.ElementTree.Element: The new 'note' element.
     """
+
     note_el = ET.SubElement(parent, 'note', {'oct': f'{note.octave}',
-        'pname': f'{note.step.lower()}', 'xml:id': f'{note.id}', 'dots': f'{note.duration.dots}'})
+                                             'pname': f'{note.step.lower()}', 'xml:id': f'{note.id}', 'dots': f'{note.duration.dots}'})
     if note.duration.isGrace:
         note_el.set('grace', 'acc')
         note_el.set('dur', duration2MEI[note.duration.type])
@@ -237,13 +246,15 @@ def addMEINote(note, parent, syl=None):
         else:
             note_el.set('accid.ges', 'n')
     if note.lyric:
-        verse_el = ET.SubElement(note_el, 'verse', {'n': '1', 'xml:id': next(idGen)})
+        verse_el = ET.SubElement(
+            note_el, 'verse', {'n': '1', 'xml:id': next(idGen)})
         syl_el = ET.SubElement(verse_el, 'syl', {'xml:id': next(idGen)})
         syl_el.text = note.lyric.strip().split('\n')[0]
     for exp in note.expressions:
         if 'Dynamic' in exp.classes:
             dyn_el = ET.SubElement(note_el, 'dynam', {'xml:id': next(idGen)})
             dyn_el.text = exp.value
+
 
 def addTieBreakers(partList):
     """
@@ -275,6 +286,7 @@ def addTieBreakers(partList):
         tieBreakers.reverse()
         part.index = pd.MultiIndex.from_arrays((part.index, tieBreakers))
 
+
 def kernClefHelper(clef):
     """
     Parse a music21 clef object into the corresponding humdrum syntax token.
@@ -289,6 +301,7 @@ def kernClefHelper(clef):
         octaveChange = 'v' * abs(clef.octaveChange)
     return f'*clef{clef.sign}{octaveChange}{clef.line}'
 
+
 def combineRests(col):
     """
     Helper function for the `notes` method. 
@@ -301,6 +314,7 @@ def combineRests(col):
     """
     col = col.dropna()
     return col[(col != 'r') | ((col == 'r') & (col.shift(1) != 'r'))]
+
 
 def combineUnisons(col):
     """
@@ -315,6 +329,7 @@ def combineUnisons(col):
     col = col.dropna()
     return col[(col == 'r') | (col != col.shift(1))]
 
+
 def githubURLtoRaw(string):
     """
     Convert a GitHub URL to a raw URL and return it. Otherwise return the string.
@@ -322,6 +337,7 @@ def githubURLtoRaw(string):
     if string.startswith('https://github.com/'):
         return 'https://raw.githubusercontent.com/' + string[19:].replace('/blob/', '/', 1)
     return string
+
 
 def fromJSON(json_path):
     """
@@ -355,7 +371,7 @@ def fromJSON(json_path):
             data = json.load(json_data)
 
     if ((isinstance(json_path, str) and json_path.lower().endswith('.dez'))
-        or (hasattr(json_path, 'name') and json_path.name.lower().endswith('.dez'))):
+            or (hasattr(json_path, 'name') and json_path.name.lower().endswith('.dez'))):
         df = pd.DataFrame.from_records(data['labels'])
         if 'start' in df.columns:
             df['start'] = df['start'].fillna(0.0)
@@ -363,6 +379,7 @@ def fromJSON(json_path):
         df = pd.DataFrame(data).T
         df.index = df.index.astype(str)
     return df
+
 
 def _id_gen(start=1):
     """
@@ -391,7 +408,10 @@ def _id_gen(start=1):
     while True:
         yield f'pyAMPACT-{start}'
         start += 1
+
+
 idGen = _id_gen()
+
 
 def indentMEI(elem, indentation='\t', _level=0):
     """
@@ -425,6 +445,7 @@ def indentMEI(elem, indentation='\t', _level=0):
         if _level and (not elem.tail or not elem.tail.strip()):
             elem.tail = i
 
+
 def _kernChordHelper(_chord):
     """
     Parse a music21 chord object into a kern chord token.
@@ -437,6 +458,7 @@ def _kernChordHelper(_chord):
     :return: A string representing the kern chord token.
     """
     return ' '.join([_kernNoteHelper(note) for note in _chord.notes])
+
 
 def kernFooter(fileExtension):
     """
@@ -453,6 +475,7 @@ def kernFooter(fileExtension):
 !!!ONB: Translated from a {fileExtension} file on {datetime.today().strftime("%Y-%m-%d")} via pyAMPACT
 !!!title: @{{OTL}}"""
 
+
 def kernHeader(metadata):
     """
     Return a string of the kern format header global comments.
@@ -462,6 +485,7 @@ def kernHeader(metadata):
     :return: A string representing the kern format header.
     """
     return f'!!!COM: {metadata["composer"]}\n!!!OTL: {metadata["title"]}'
+
 
 def _kernNoteHelper(_note):
     """
@@ -513,12 +537,14 @@ def _kernNoteHelper(_note):
     else:
         grace = ''
         dur = _duration2Kern[round(float(_note.quarterLength), 5)]
-    grace = 'q' if _note.duration.isGrace else ''   # TODO: make this sensitive to notehead and practical duration
+    # TODO: make this sensitive to notehead and practical duration
+    grace = 'q' if _note.duration.isGrace else ''
     fermata = ''
     for exp in _note.expressions:
         if exp.name == 'fermata':
             fermata = ';'
     return f'{startBracket}{dur}{letter}{acc}{longa}{grace}{fermata}{beaming}{endBracket}'
+
 
 def kernNRCHelper(nrc):
     """
@@ -539,6 +565,7 @@ def kernNRCHelper(nrc):
     else:
         return ' '.join([_kernNoteHelper(note) for note in nrc.notes])
 
+
 def noteRestHelper(nr):
     """
     Helper function for the `notes` method. 
@@ -552,6 +579,7 @@ def noteRestHelper(nr):
     if nr.isRest:
         return 'r'
     return nr.nameWithOctave
+
 
 def remove_namespaces(doc):
     """
@@ -574,6 +602,7 @@ def remove_namespaces(doc):
     if namespace:
         root.set('xmlns', namespace)
 
+
 def removeTied(noteOrRest):
     """
     Helper function for the `_m21ObjectsNoTies` method. 
@@ -588,6 +617,7 @@ def removeTied(noteOrRest):
     if hasattr(noteOrRest, 'tie') and noteOrRest.tie is not None and noteOrRest.tie.type != 'start':
         return np.nan
     return noteOrRest
+
 
 def snapTo(data, snap_to=None, filler='forward', output='array'):
     """"
@@ -640,3 +670,64 @@ def snapTo(data, snap_to=None, filler='forward', output='array'):
         return _data.values
     else:
         return _data
+
+
+def truncate_and_scale_onsOffsList(onsOffsList, target_length):
+    """
+    Scale and truncate onsOffsList to match the target_length, adjusting values proportionally.
+
+    Parameters:
+    onsOffsList (list of lists): List containing [ONSET_SEC, OFFSET_SEC] pairs.
+    target_length (int): Desired length of the output list.
+
+    Returns:
+    list of lists: Scaled and truncated onsOffsList.
+    """
+    current_length = len(onsOffsList)
+
+    if current_length == target_length:
+        return onsOffsList
+
+    elif current_length > target_length:
+        # Scale down
+        scale_factor = current_length / target_length
+        truncated_list = []
+        for i in range(target_length):
+            start_index = int(i * scale_factor)
+            end_index = int((i + 1) * scale_factor)
+
+            # Calculate mean values for the range
+            start_time = np.mean(
+                [onsOffsList[start_index][0], onsOffsList[end_index - 1][0]])
+            end_time = np.mean(
+                [onsOffsList[start_index][1], onsOffsList[end_index - 1][1]])
+
+            truncated_list.append([start_time, end_time])
+
+        return truncated_list
+
+    else:
+        # Scale up by interpolation
+        scaling_factor = target_length / current_length
+        new_onsOffsList = []
+        for i in range(target_length):
+            original_index = i / scaling_factor
+            lower_index = int(np.floor(original_index))
+            upper_index = int(np.ceil(original_index))
+
+            if lower_index == upper_index:
+                new_onsOffsList.append(onsOffsList[lower_index])
+            else:
+                upper_index = upper_index - 1
+                lower_value = onsOffsList[lower_index]
+                upper_value = onsOffsList[upper_index]
+                fraction = original_index - lower_index
+
+                new_onsOffsList.append([
+                    lower_value[0] + fraction *
+                    (upper_value[0] - lower_value[0]),
+                    lower_value[1] + fraction *
+                    (upper_value[1] - lower_value[1])
+                ])
+
+        return new_onsOffsList

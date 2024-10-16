@@ -8,7 +8,7 @@
 pyAMPACT
 **************
 `pyAMPACT` (Python-based Automatic Music Performance Analysis and Comparison
-Toolkit) is a python package thatlinks symbolic and audio music representations
+Toolkit) is a python package that links symbolic and audio music representations
 to facilitate score-informed estimation of performance data in audio as well as
 general linking of symbolic and audio music representations with a variety of
 annotations. pyAMPACT  can read a range of symbolic formats and can output

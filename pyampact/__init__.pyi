@@ -6,26 +6,22 @@ from .alignment import (
     align_midi_wav as align_midi_wav,
     alignment_visualiser as alignment_visualiser,
     ifgram as ifgram,
-    get_ons_offs as get_ons_offs    
-    
+    get_ons_offs as get_ons_offs
+
 )
-    
+
 from .alignmentUtils import (
+    dpcore as dpcore,
     dp as dp,
-    fill_priormat_gauss as fill_priormat_gauss ,
     gh as gh,
-    flatTopGaussIdx as flatTopGaussIdx,
     g as g,
-    flatTopGaussian as flatTopGaussian,
-    viterbi_path as viterbi_path,
-    mixgauss_prob as mixgauss_prob,
-    fill_trans_mat as fill_trans_mat,
     orio_simmx as orio_simmx,
     simmx as simmx,
     maptimes as maptimes,
-    calculate_f0_est as calculate_f0_est,
     f0_est_weighted_sum as f0_est_weighted_sum,
-    f0_est_weighted_sum_spec as f0_est_weighted_sum_spec
+    f0_est_weighted_sum_spec as f0_est_weighted_sum_spec,
+    durations_from_midi_ticks as durations_from_midi_ticks,
+    load_audiofile as load_audiofile
 
 )
 
@@ -62,5 +58,6 @@ from .symbolicUtils import (
     remove_namespaces as remove_namespaces,
     removeTied as removeTied,
     snapTo as snapTo,
+    truncate_and_scale_onsOffsList as truncate_and_scale_onsOffsList,
     githubURLtoRaw as githubURLtoRaw
 )

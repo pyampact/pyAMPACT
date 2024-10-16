@@ -10,29 +10,31 @@ symbolic
 
 """
 
+from pyampact.symbolicUtils import *
+from fractions import Fraction
+import tempfile
+import mido
+import xml.etree.ElementTree as ET
+import requests
+import re
+import pandas as pd
+import numpy as np
+import json
+import librosa
+import tempfile
+from .symbolicUtils import *
+import os
 import ast
 import base64
 from copy import deepcopy
 import math
 import music21 as m21
 m21.environment.set('autoDownload', 'allow')
-import os
-from .symbolicUtils import *
-import tempfile
-import librosa
 
-#utils
-import json
-import numpy as np
-import pandas as pd
-import re
-import requests
-import xml.etree.ElementTree as ET
-from fractions import Fraction
+# utils
 idx = pd.IndexSlice
 
 # Comment for package build
-from pyampact.symbolicUtils import *
 
 # Uncomment for package build
 __all__ = [
@@ -57,12 +59,12 @@ __all__ = [
     "dez",
     "form",
     "romanNumerals",
-    "tony",
     "_m21ObjectsNoTies",
     "_measures",
     "_barlines",
     "_timeSignatures",
     "durations",
+    "midi_ticks_durations",
     "midiPitches",
     "notes",
     "kernNotes",
@@ -77,6 +79,7 @@ __all__ = [
     "_meiStack",
     "toMEI"
 ]
+
 
 def convert_attribs_to_str(element):
     for key in element.attrib:
@@ -109,13 +112,16 @@ class Score:
         url_or_path = 'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn'
         piece = Score(url_or_path)
     """
+
     def __init__(self, score_path):
         self._analyses = {}
         if score_path.startswith('https://github.com/'):
-            score_path = 'https://raw.githubusercontent.com/' + score_path[19:].replace('/blob/', '/', 1)
+            score_path = 'https://raw.githubusercontent.com/' + \
+                score_path[19:].replace('/blob/', '/', 1)
         self.path = score_path
         self.fileName = score_path.rsplit('.', 1)[0].rsplit('/')[-1]
-        self.fileExtension = score_path.rsplit('.', 1)[1] if '.' in score_path else ''
+        self.fileExtension = score_path.rsplit(
+            '.', 1)[1] if '.' in score_path else ''
         self.partNames = []
         self.score = None
         self._meiTree = None
@@ -130,12 +136,14 @@ class Score:
                     self._import_other_spines(tmp_path)
             finally:
                 os.remove(tmp_path)
-        else:  # file is not an online kern file (can be either or neither but not both)
+        # file is not an online kern file (can be either or neither but not both)
+        else:
             self._assignM21Attributes()
             self._import_other_spines()
-        self.public = '\n'.join([f'{prop.ljust(15)}{type(getattr(self, prop))}' for prop in dir(self) if not prop.startswith('_')])
+        self.public = '\n'.join([f'{prop.ljust(15)}{type(getattr(self, prop))}' for prop in dir(
+            self) if not prop.startswith('_')])
         self._partList()
-    
+
     def _assignM21Attributes(self, path=''):
         """
         Assign music21 attributes to a given object.
@@ -145,10 +153,13 @@ class Score:
         """
         if self.path not in imported_scores:
             if path:   # parse humdrum files differently to extract their function, and harm spines if they have them
-                imported_scores[self.path] = m21.converter.parse(path, format='humdrum')
-            elif self.fileExtension in ('xml', 'musicxml', 'mei', 'mxl'):   # these files might be mei files and could lack elements music21 needs to be able to read them
+                imported_scores[self.path] = m21.converter.parse(
+                    path, format='humdrum')
+            # these files might be mei files and could lack elements music21 needs to be able to read them
+            elif self.fileExtension in ('xml', 'musicxml', 'mei', 'mxl'):
                 if self.path.startswith('http'):
-                    tree = ET.ElementTree(ET.fromstring(requests.get(self.path).text))
+                    tree = ET.ElementTree(ET.fromstring(
+                        requests.get(self.path).text))
                 else:
                     tree = ET.parse(self.path)
                 remove_namespaces(tree)
@@ -158,14 +169,17 @@ class Score:
                 if len(_functions):
                     hasFunctions = True
 
-                if root.tag.endswith('mei'):   # this is an mei file even if the fileExtension is .xml
+                # this is an mei file even if the fileExtension is .xml
+                if root.tag.endswith('mei'):
                     parseEdited = False
                     self._meiTree = deepcopy(root)
-                    if not root.find('.//scoreDef'):   # this mei file doesn't have a scoreDef element, so construct one and add it to the score
+                    # this mei file doesn't have a scoreDef element, so construct one and add it to the score
+                    if not root.find('.//scoreDef'):
                         parseEdited = True
                         self.insertScoreDef(root)
 
-                    for section in root.iter('section'):   # make sure all events are contained in measures
+                    # make sure all events are contained in measures
+                    for section in root.iter('section'):
                         if section.find('measure') is None:
                             parseEdited = True
                             measure = ET.Element('measure')
@@ -176,20 +190,25 @@ class Score:
 
                     if parseEdited:
                         mei_string = ET.tostring(root, encoding='unicode')
-                        imported_scores[self.path] = m21.converter.subConverters.ConverterMEI().parseData(mei_string)
+                        imported_scores[self.path] = m21.converter.subConverters.ConverterMEI(
+                        ).parseData(mei_string)
                         parseEdited = False
 
                 if hasFunctions:   # not an mei file, but an xml file that had functions
                     try:
-                        imported_scores[self.path] = m21.converter.parse(self.path)
+                        imported_scores[self.path] = m21.converter.parse(
+                            self.path)
                     except m21.harmony.HarmonyException:
-                        print('There was an issue with the function texts so they were removed.')
+                        print(
+                            'There was an issue with the function texts so they were removed.')
                         for _function in _functions:
                             _function.text = ''
                         xml_string = ET.tostring(root, encoding='unicode')
-                        imported_scores[self.path] = m21.converter.parse(xml_string, format='MusicXML')
+                        imported_scores[self.path] = m21.converter.parse(
+                            xml_string, format='MusicXML')
 
-            elif self.fileExtension in ('', 'txt'):   # read file/string as volpiano or tinyNotation if applicable
+            # read file/string as volpiano or tinyNotation if applicable
+            elif self.fileExtension in ('', 'txt'):
                 temp = None
                 text = self.path
                 if self.fileExtension == 'txt':
@@ -207,6 +226,46 @@ class Score:
                     _score.insert(0, temp)
                     imported_scores[self.path] = _score
 
+            elif self.fileExtension == 'csv':   # read csv file as a pandas DataFrame with no header and no index
+                csv_df = pd.read_csv(self.path, header=None, index_col=False)
+                if len(csv_df.columns) != 3:
+                    print(
+                        "This csv file is not a 3-column Tony file so it can't be imported.")
+                    return
+                else:  # assume it's a Tony file if it has 3 columns
+                    # sometimes these files only have two columns instead of three
+                    csv_df.columns = ('ONSET_SEC', 'AVG PITCH IN HZ', 'DURATION')[
+                        :len(csv_df.columns)]
+                    csv_df['MIDI'] = csv_df['AVG PITCH IN HZ'].map(
+                        lambda freq: librosa.hz_to_midi(freq)).round().astype('Int16')
+                    self._analyses['tony_csv'] = csv_df
+                    _parts = pd.DataFrame(csv_df['MIDI'])
+                    _parts.columns = ['Part-1']
+                    self._analyses[('_parts', False, False,
+                                    False, False)] = _parts
+                    dur = pd.DataFrame(csv_df['DURATION'])
+                    dur.columns = ['Part-1']
+                    dur.index = pd.MultiIndex.from_tuples(
+                        [(i, 0) for i in dur.index])
+                    self._analyses[('durations', True)] = dur
+                    midiPitches = pd.DataFrame(csv_df['MIDI'])
+                    midiPitches.columns = ['Part-1']
+                    midiPitches.index = pd.MultiIndex.from_tuples(
+                        [(i, 0) for i in midiPitches.index])
+                    self._analyses[('midiPitches', True)] = midiPitches
+                    measures = pd.DataFrame([1])
+                    measures.columns = ['Part-1']
+                    self._analyses[('_measures', False)] = measures
+                    xmlIDs = pd.DataFrame([next(idGen)
+                                          for x in range(len(csv_df.index))])
+                    xmlIDs.columns = ['Part-1']
+                    xmlIDs.index = pd.MultiIndex.from_tuples(
+                        [(i, 0) for i in xmlIDs.index])
+                    self._analyses['xmlIDs'] = xmlIDs
+                    self.partNames = ['Part-1']
+                    self._analyses['_partList'] = [None]
+                    return
+
         if self.path not in imported_scores:   # check again to catch valid tree files
             if self.path.startswith('http') and self.fileExtension in ('mid', 'midi'):
                 midi_bytes = requests.get(self.path).content
@@ -214,7 +273,8 @@ class Score:
             else:
                 imported_scores[self.path] = m21.converter.parse(self.path)
         self.score = imported_scores[self.path]
-        self.metadata = {'title': "Title not found", 'composer': "Composer not found"}
+        self.metadata = {'title': "Title not found",
+                         'composer': "Composer not found"}
         if self.score.metadata is not None:
             self.metadata['title'] = self.score.metadata.title or 'Title not found'
             self.metadata['composer'] = self.score.metadata.composer or 'Composer not found'
@@ -227,8 +287,10 @@ class Score:
             flat.remove(toRemove)
             flat.makeMeasures(inPlace=True)
             flat.makeAccidentals(inPlace=True)
-            self._flatParts.append(flat.flatten())   # you have to flatten again after calling makeMeasures
-            name = flat.partName if (flat.partName and flat.partName not in self.partNames) else f'Part-{i + 1}'
+            # you have to flatten again after calling makeMeasures
+            self._flatParts.append(flat.flatten())
+            name = flat.partName if (
+                flat.partName and flat.partName not in self.partNames) else f'Part-{i + 1}'
             self.partNames.append(name)
 
     def _partList(self):
@@ -251,49 +313,62 @@ class Score:
                         graces.append(nrc)
                         graceOffsets.append(round(float(nrc.offset), 5))
                     else:
-                        if (nrc.isRest and nrc.quarterLength > 18):  # get rid of really long rests TODO: make this get rid of rests longer than the prevailing measure
+                        # get rid of really long rests TODO: make this get rid of rests longer than the prevailing measure
+                        if (nrc.isRest and nrc.quarterLength > 18):
                             continue
                         offset = round(float(nrc.offset), 5)
                         if offset in notGraces:
                             notGraces[offset].append(nrc)
                         else:
                             notGraces[offset] = [nrc]
-                    
+
                 ser = pd.Series(notGraces)
                 if ser.empty:   # no note, rest, or chord objects detected in this part
                     ser.name = self.partNames[ii]
                     parts.append(ser)
                     continue
-                df = ser.apply(pd.Series)  # make each cell a row resulting in a df where each col is a separate synthetic voice
-                if len(df.columns > 1):  # swap elements in cols at this offset until all of them fill the space left before the next note in each col
+                # make each cell a row resulting in a df where each col is a separate synthetic voice
+                df = ser.apply(pd.Series)
+                # swap elements in cols at this offset until all of them fill the space left before the next note in each col
+                if len(df.columns > 1):
                     for jj, ndx in enumerate(df.index):
                         # calculate dur inside the loop to avoid having to swap its elements like we do for df
-                        dur = df.map(lambda cell: round(float(cell.quarterLength), 5), na_action='ignore')
+                        dur = df.map(lambda cell: round(
+                            float(cell.quarterLength), 5), na_action='ignore')
                         for thisCol in range(len(df.columns) - 1):
                             if isinstance(df.iat[jj, thisCol], float):  # ignore NaNs
                                 continue
                             thisDur = dur.iat[jj, thisCol]
-                            thisNextNdx = df.iloc[jj+1:, thisCol].first_valid_index() or self.score.highestTime
-                            thisPrevNdx = df.iloc[:jj, thisCol].last_valid_index() or 0
+                            thisNextNdx = df.iloc[jj+1:, thisCol].first_valid_index(
+                            ) or self.score.highestTime
+                            thisPrevNdx = df.iloc[:jj,
+                                                  thisCol].last_valid_index() or 0
                             if thisPrevNdx > 0:
                                 thisPrevDur = dur[thisCol].at[thisPrevNdx]
-                                if thisPrevNdx + thisPrevDur - ndx > .00003:    # current note happens before previous note ended so swap for a NaN if there is one
+                                # current note happens before previous note ended so swap for a NaN if there is one
+                                if thisPrevNdx + thisPrevDur - ndx > .00003:
                                     for otherCol in range(thisCol + 1, len(df.columns)):
                                         if isinstance(df.iat[jj, otherCol], float):
-                                            df.iloc[jj, [thisCol, otherCol]] = df.iloc[jj, [otherCol, thisCol]]
+                                            df.iloc[jj, [thisCol, otherCol]] = df.iloc[jj, [
+                                                otherCol, thisCol]]
                                             break
-                            if abs(thisNextNdx - ndx - thisDur) < .00003:   # this nrc takes up the amount of time expected in this col so no need to swap
+                            # this nrc takes up the amount of time expected in this col so no need to swap
+                            if abs(thisNextNdx - ndx - thisDur) < .00003:
                                 continue
-                            for otherCol in range(thisCol + 1, len(df.columns)):  # look for an nrc in another col with the duration thisCol needs
-                                if isinstance(df.iat[jj, otherCol], float):  # once we get a nan there's no hope of finding a valid swap at this index
+                            # look for an nrc in another col with the duration thisCol needs
+                            for otherCol in range(thisCol + 1, len(df.columns)):
+                                # once we get a nan there's no hope of finding a valid swap at this index
+                                if isinstance(df.iat[jj, otherCol], float):
                                     break
                                 otherDur = dur.iat[jj, otherCol]
                                 if abs(thisNextNdx - ndx - otherDur) < .00003:  # found a valid swap
-                                    df.iloc[jj, [thisCol, otherCol]] = df.iloc[jj, [otherCol, thisCol]]
+                                    df.iloc[jj, [thisCol, otherCol]
+                                            ] = df.iloc[jj, [otherCol, thisCol]]
                                     break
 
                 if len(graces):  # add all the grace notes found to col0
-                    part0 = pd.concat((pd.Series(graces, graceOffsets), df.iloc[:, 0].dropna())).sort_index(kind='mergesort')
+                    part0 = pd.concat((pd.Series(
+                        graces, graceOffsets), df.iloc[:, 0].dropna())).sort_index(kind='mergesort')
                     isUnique = False
                 else:
                     part0 = df.iloc[:, 0].dropna()
@@ -302,33 +377,41 @@ class Score:
                 kernStrands.append(part0)
 
                 strands = []
-                for col in range(1, len(df.columns)):  # if df has more than 1 column, iterate over the non-first columns
+                # if df has more than 1 column, iterate over the non-first columns
+                for col in range(1, len(df.columns)):
                     part = df.iloc[:, col].dropna()
                     _copy = part.copy()
                     _copy.name = f'{part0.name}_{col}'
                     parts.append(_copy)
-                    dur = part.apply(lambda nrc: nrc.quarterLength).astype(float).round(5)
+                    dur = part.apply(lambda nrc: nrc.quarterLength).astype(
+                        float).round(5)
                     prevEnds = (dur + dur.index).shift()
                     startI = 0
                     for endI, endNdx in enumerate(part.index[startI:]):
                         endNdx = round(float(endNdx), 5)
-                        nextNdx = self.score.highestTime if len(part) - 1 == endI else part.index[endI + 1]
+                        nextNdx = self.score.highestTime if len(
+                            part) - 1 == endI else part.index[endI + 1]
                         thisDur = part.iat[endI].quarterLength
                         if abs(nextNdx - endNdx - thisDur) > .00003:
                             strand = part.iloc[startI:endI + 1].copy()
                             strand.name = f'{self.partNames[ii]}__{len(strands) + 1}'
-                            divisiStarts.append(pd.Series(('*^', '*^'), index=(strand.name, self.partNames[ii]), name=part.index[startI], dtype='string'))
+                            divisiStarts.append(pd.Series(
+                                ('*^', '*^'), index=(strand.name, self.partNames[ii]), name=part.index[startI], dtype='string'))
                             joinNdx = endNdx + thisDur        # find a suitable endpoint to rejoin this strand
-                            divisiEnds.append(pd.Series(('*v', '*v'), index=(strand.name, self.partNames[ii]), name=(strand.name, joinNdx), dtype='string'))
+                            divisiEnds.append(pd.Series(('*v', '*v'), index=(
+                                strand.name, self.partNames[ii]), name=(strand.name, joinNdx), dtype='string'))
                             strands.append(strand)
                             startI = endI + 1
-                kernStrands.extend(sorted(strands, key=lambda _strand: _strand.last_valid_index()))
+                kernStrands.extend(
+                    sorted(strands, key=lambda _strand: _strand.last_valid_index()))
 
-            self._analyses['_divisiStarts'] = pd.DataFrame(divisiStarts).fillna('*').sort_index()
+            self._analyses['_divisiStarts'] = pd.DataFrame(
+                divisiStarts).fillna('*').sort_index()
             de = pd.DataFrame(divisiEnds)
             if not de.empty:
                 de = de.reset_index(level=1)
-                de = de.reindex([prt.name for prt in kernStrands if prt.name not in self.partNames]).set_index('level_1')
+                de = de.reindex(
+                    [prt.name for prt in kernStrands if prt.name not in self.partNames]).set_index('level_1')
             self._analyses['_divisiEnds'] = de
             if not isUnique:
                 addTieBreakers(parts)
@@ -338,7 +421,7 @@ class Score:
         return self._analyses['_partList']
 
     def _parts(self, multi_index=False, kernStrands=False, compact=False,
-            number=False):
+               number=False):
         """
         Return a DataFrame of the note, rest, and chord objects in the score.
 
@@ -366,25 +449,31 @@ class Score:
             elif compact:
                 toConcat = self._partList()
                 if number:
-                    partNameToNum = {part: i + 1 for i, part in enumerate(self.partNames)}
+                    partNameToNum = {part: i + 1 for i,
+                                     part in enumerate(self.partNames)}
                     colTuples = []
                     for part in toConcat:
                         names = part.name.split('_')
                         if len(names) == 1:
                             colTuples.append((partNameToNum[names[0]], 1))
                         else:
-                            colTuples.append((partNameToNum[names[0]], int(names[1]) + 1))
-                    mi = pd.MultiIndex.from_tuples(colTuples, names=('Staff', 'Layer'))
+                            colTuples.append(
+                                (partNameToNum[names[0]], int(names[1]) + 1))
+                    mi = pd.MultiIndex.from_tuples(
+                        colTuples, names=('Staff', 'Layer'))
             else:
                 for part in self._partList():
                     if part.empty:
                         toConcat.append(part)
                         continue
-                    listify = part.apply(lambda nrc: nrc.notes if nrc.isChord else [nrc])
+                    listify = part.apply(
+                        lambda nrc: nrc.notes if nrc.isChord else [nrc])
                     expanded = listify.apply(pd.Series)
-                    expanded.columns = [f'{part.name}:{i}' if i > 0 else part.name for i in range(len(expanded.columns))]
+                    expanded.columns = [f'{part.name}:{i}' if i > 0 else part.name for i in range(
+                        len(expanded.columns))]
                     toConcat.append(expanded)
-            df = pd.concat(toConcat, axis=1, sort=True) if len(toConcat) else pd.DataFrame(columns=self.partNames)
+            df = pd.concat(toConcat, axis=1, sort=True) if len(
+                toConcat) else pd.DataFrame(columns=self.partNames)
             if not multi_index and isinstance(df.index, pd.MultiIndex):
                 df.index = df.index.droplevel(1)
             if compact and number:
@@ -421,7 +510,8 @@ class Score:
                         # there usually won't be any m21 objects at the same position as the key events,
                         # so use the position from the next item in eventList if there is a next item.
                         if not gotKeys and i + 1 < len(spine.eventList):
-                            keyVals.append(contents[1:-1])     # [1:-1] to remove the * and : characters
+                            # [1:-1] to remove the * and : characters
+                            keyVals.append(contents[1:-1])
                             keyPositions.append(spine.eventList[i+1].position)
                         continue
                     elif not start and spine.spineType not in ('function', 'harm') and not contents.startswith('*'):
@@ -429,7 +519,7 @@ class Score:
                         if not contents.startswith('!') and not contents.startswith('='):
                             vals.append(contents)
                             valPositions.append(event.position)
-                    elif not start or '!' in contents or '=' in  contents or '*' in contents:
+                    elif not start or '!' in contents or '=' in contents or '*' in contents:
                         continue
                     else:
                         if spine.spineType == 'function':
@@ -445,7 +535,8 @@ class Score:
                 df1 = self._priority()
                 name = spine.spineType.title()
                 if name == 'Cdata':
-                    df2 = pd.DataFrame([ast.literal_eval(val) for val in vals], index=valPositions)
+                    df2 = pd.DataFrame([ast.literal_eval(val)
+                                       for val in vals], index=valPositions)
                 else:
                     df2 = pd.DataFrame({name: vals}, index=valPositions)
                 joined = df1.join(df2, on='Priority')
@@ -462,7 +553,8 @@ class Score:
                 if not gotKeys and len(keyVals):
                     keyName = 'keys'
                     # key records are usually not found at a kern line with notes so take the next valid one
-                    keyPositions = [df1.iat[np.where(df1.Priority >= kp)[0][0], 0] for kp in keyPositions]
+                    keyPositions = [df1.iat[np.where(df1.Priority >= kp)[
+                        0][0], 0] for kp in keyPositions]
                     df3 = pd.DataFrame({keyName: keyVals}, index=keyPositions)
                     joined = df1.join(df3, on='Priority')
                     ser = joined.iloc[:, 2].copy()
@@ -497,24 +589,32 @@ class Score:
                 tsigs = self._timeSignatures(False)
                 tsig1 = tsigs.iat[0, 0]
                 scoreDef = ET.Element('scoreDef', {'xml:id': next(idGen), 'n': '1',
-                    'meter.count': f'{tsig1.numerator}', 'meter.unit': f'{tsig1.denominator}'})
+                                                   'meter.count': f'{tsig1.numerator}', 'meter.unit': f'{tsig1.denominator}'})
             else:
-                scoreDef = ET.Element('scoreDef', {'xml:id': next(idGen), 'n': '1'})
+                scoreDef = ET.Element(
+                    'scoreDef', {'xml:id': next(idGen), 'n': '1'})
             pgHead = ET.SubElement(scoreDef, 'pgHead')
-            rend1 = ET.SubElement(pgHead, 'rend', {'halign': 'center', 'valign': 'top'})
-            rend_title = ET.SubElement(rend1, 'rend', {'type': 'title', 'fontsize': 'x-large'})
+            rend1 = ET.SubElement(
+                pgHead, 'rend', {'halign': 'center', 'valign': 'top'})
+            rend_title = ET.SubElement(
+                rend1, 'rend', {'type': 'title', 'fontsize': 'x-large'})
             rend_title.text = 'Untitled score'
             ET.SubElement(rend1, 'lb')
-            rend_subtitle = ET.SubElement(rend1, 'rend', {'type': 'subtitle', 'fontsize': 'large'})
+            rend_subtitle = ET.SubElement(
+                rend1, 'rend', {'type': 'subtitle', 'fontsize': 'large'})
             rend_subtitle.text = 'Subtitle'
-            rend2 = ET.SubElement(pgHead, 'rend', {'halign': 'right', 'valign': 'bottom'})
+            rend2 = ET.SubElement(
+                pgHead, 'rend', {'halign': 'right', 'valign': 'bottom'})
             rend_composer = ET.SubElement(rend2, 'rend', {'type': 'composer'})
             rend_composer.text = 'Composer / arranger'
-            staffGrp = ET.SubElement(scoreDef, 'staffGrp', {'xml:id': next(idGen), 'n': '1', 'symbol': 'bracket'})
+            staffGrp = ET.SubElement(scoreDef, 'staffGrp', {
+                                     'xml:id': next(idGen), 'n': '1', 'symbol': 'bracket'})
             if not len(self.partNames):
-                self.partNames = sorted({f'Part-{staff.attrib.get("n")}' for staff in root.iter('staff')})
+                self.partNames = sorted(
+                    {f'Part-{staff.attrib.get("n")}' for staff in root.iter('staff')})
             for i, staff in enumerate(self.partNames):
-                attribs = {'label': staff, 'n': str(i + 1), 'xml:id': next(idGen), 'lines': '5'}
+                attribs = {'label': staff, 'n': str(
+                    i + 1), 'xml:id': next(idGen), 'lines': '5'}
                 if self.score is not None:
                     clef = clefs.iloc[0, i]
                     attribs['clef.line'] = f'{clef.line}'
@@ -530,7 +630,8 @@ class Score:
                         elif val > 0 and ksig.alteredPitches[0].accidental.modifier == '#':
                             attribs['key.sig'] = f'{val}s'
                 staffDef = ET.SubElement(staffGrp, 'staffDef', attribs)
-                label = ET.SubElement(staffDef, 'label', {'xml:id': next(idGen)})
+                label = ET.SubElement(staffDef, 'label', {
+                                      'xml:id': next(idGen)})
                 label.text = staff
             scoreEl = root.find('.//score')
             if scoreEl is not None:
@@ -560,13 +661,16 @@ class Score:
         if self.fileExtension in ('xml', 'mei'):
             tree = ET.parse(self.path)
             root = tree.getroot()
-            idString = [key for key in root.attrib.keys() if key.endswith('}id')]
+            idString = [key for key in root.attrib.keys()
+                        if key.endswith('}id')]
             if len(idString):
                 idString = idString[0]
                 data = {}
-                dotCoefficients = {None: 1, '1': 1.5, '2': 1.75, '3': 1.875, '4': 1.9375}
+                dotCoefficients = {None: 1, '1': 1.5,
+                                   '2': 1.75, '3': 1.875, '4': 1.9375}
                 for staff in root.findall('.//staff'):
-                    for layer in staff.findall('layer'):   # doesn't need './/' because only looks for direct children of staff elements
+                    # doesn't need './/' because only looks for direct children of staff elements
+                    for layer in staff.findall('layer'):
                         column_name = f"Staff{staff.get('n')}_Layer{layer.get('n')}"
                         if column_name not in data:
                             data[column_name] = []
@@ -589,7 +693,8 @@ class Score:
                 self._analyses['xmlIDs'] = df
                 return df
         # either not xml/mei, or an idString wasn't found
-        df = self._parts(multi_index=True).map(lambda obj: f'{obj.id}', na_action='ignore')
+        df = self._parts(multi_index=True).map(
+            lambda obj: f'{obj.id}', na_action='ignore')
         self._analyses['xmlIDs'] = df
         return df
 
@@ -632,7 +737,8 @@ class Score:
         """
         key = ('lyrics', strip)
         if key not in self._analyses:
-            df = self._parts().map(self._lyricHelper, na_action='ignore', **{'strip': strip}).dropna(how='all')
+            df = self._parts().map(self._lyricHelper, na_action='ignore',
+                                   **{'strip': strip}).dropna(how='all')
             self._analyses[key] = df
         return self._analyses[key].copy()
 
@@ -650,8 +756,10 @@ class Score:
             parts = []
             isUnique = True
             for i, flat_part in enumerate(self._flatParts):
-                ser = pd.Series(flat_part.getElementsByClass(['Clef']), name=self.partNames[i])
-                ser.index = ser.apply(lambda nrc: nrc.offset).astype(float).round(5)
+                ser = pd.Series(flat_part.getElementsByClass(
+                    ['Clef']), name=self.partNames[i])
+                ser.index = ser.apply(
+                    lambda nrc: nrc.offset).astype(float).round(5)
                 ser = ser[~ser.index.duplicated(keep='last')]
 
                 if not ser.index.is_unique:
@@ -667,7 +775,8 @@ class Score:
                         else:
                             tieBreakers.append(0)
                     tieBreakers.reverse()
-                    part.index = pd.MultiIndex.from_arrays((part.index, tieBreakers))
+                    part.index = pd.MultiIndex.from_arrays(
+                        (part.index, tieBreakers))
             clefs = pd.concat(parts, axis=1)
             if isinstance(clefs.index, pd.MultiIndex):
                 clefs = clefs.droplevel(1)
@@ -685,7 +794,8 @@ class Score:
         :return: A pandas DataFrame of the clefs in the score in kern format.
         """
         if '_clefs' not in self._analyses:
-            self._analyses['_clefs'] = self._m21Clefs().map(kernClefHelper, na_action='ignore')
+            self._analyses['_clefs'] = self._m21Clefs().map(
+                kernClefHelper, na_action='ignore')
         return self._analyses['_clefs']
 
     def dynamics(self):
@@ -710,7 +820,8 @@ class Score:
             piece.dynamics()
         """
         if 'dynamics' not in self._analyses:
-            dyns = [pd.Series({obj.offset: obj.value for obj in sf.getElementsByClass('Dynamic')}, dtype='string') for sf in self._flatParts]
+            dyns = [pd.Series({obj.offset: obj.value for obj in sf.getElementsByClass(
+                'Dynamic')}, dtype='string') for sf in self._flatParts]
             dyns = pd.concat(dyns, axis=1)
             dyns.columns = self.partNames
             dyns.dropna(how='all', axis=1, inplace=True)
@@ -729,12 +840,15 @@ class Score:
             if self.fileExtension != 'krn':
                 priority = pd.DataFrame()
             else:
-                parts = self._parts(compact=True)   # use compact to avoid losing priorities of chords
+                # use compact to avoid losing priorities of chords
+                parts = self._parts(compact=True)
                 if parts.empty:
                     priority = pd.DataFrame()
                 else:
-                    priority = parts.map(lambda cell: cell.priority, na_action='ignore').ffill(axis=1).iloc[:, -1].astype('Int16')
-                    priority = pd.DataFrame({'Priority': priority.values, 'Offset': priority.index})
+                    priority = parts.map(lambda cell: cell.priority, na_action='ignore').ffill(
+                        axis=1).iloc[:, -1].astype('Int16')
+                    priority = pd.DataFrame(
+                        {'Priority': priority.values, 'Offset': priority.index})
             self._analyses['_priority'] = priority
         return self._analyses['_priority']
 
@@ -771,7 +885,7 @@ class Score:
             pianoRoll = piece.pianoRoll()
             keys = piece.keys(snap_to=pianoRoll)
             combined = pd.concat((pianoRoll, keys))
-        
+
         The `sampled` and `mask` dfs often have more observations than the spine 
         contents, so you may want to fill in these new empty slots somehow. The kern 
         format uses '.' as a filler token so you can pass this as the `filler` 
@@ -832,7 +946,7 @@ class Score:
             pianoRoll = piece.pianoRoll()
             harm = piece.harm(snap_to=pianoRoll, output='series')
             combined = pd.concat((pianoRoll, harm))
-        
+
         The `sampled` and `mask` dfs often have more observations than the spine 
         contents, so you may want to fill in these new empty slots somehow. The kern 
         format uses '.' as a filler token so you can pass this as the `filler` 
@@ -894,7 +1008,7 @@ class Score:
             pianoRoll = piece.pianoRoll()
             functions = piece.functions(snap_to=pianoRoll)
             combined = pd.concat((pianoRoll, functions))
-        
+
         The `sampled` and `mask` dfs often have more observations than the spine 
         contents, so you may want to fill in these new empty slots somehow. The kern 
         format uses '.' as a filler token so you can pass this as the `filler` 
@@ -958,7 +1072,7 @@ class Score:
             pianoRoll = piece.pianoRoll()
             chords = piece.chords(snap_to=pianoRoll)
             combined = pd.concat((pianoRoll, chords))
-        
+
         The `sampled` and `mask` dfs often have more observations than the spine 
         contents, so you may want to fill in these new empty slots somehow. The kern 
         format uses '.' as a filler token so you can pass this as the `filler` 
@@ -1023,7 +1137,7 @@ class Score:
             pianoRoll = piece.pianoRoll()
             cdata = piece.cdata(snap_to=pianoRoll)
             combined = pd.concat((pianoRoll, cdata))
-        
+
         The `sampled` and `mask` dfs often have more observations than the spine 
         contents, so you may want to fill in these new empty slots somehow. The kern 
         format uses '.' as a filler token so you can pass this as the `filler` 
@@ -1077,7 +1191,7 @@ class Score:
         the data will still be given as a 1-column dataframe. When you import a kern
         file, it automatically gets scanned for other spine types and if any are found
         you can see them with the `foundSpines` attribute.
-        
+
         This example takes a score with **cdata-rdiss spines (Renaissance dissonance
         analysis), and makes a DataFrame of just the **cdata-rdiss spines. The full
         score with color-coded dissonance labels can be seen on the Verovio Humdrum
@@ -1103,7 +1217,8 @@ class Score:
         if spineType.startswith('**'):
             spineType = spineType[2:]
         if hasattr(self, 'foundSpines') and spineType in self.foundSpines:
-            ret = snapTo(self._analyses[spineType], filler='nan', output='dataframe')
+            ret = snapTo(self._analyses[spineType],
+                         filler='nan', output='dataframe')
             ret.dropna(how='all', inplace=True)
             if len(ret.columns) == len(self.partNames):
                 ret.columns = self.partNames
@@ -1121,10 +1236,11 @@ class Score:
 
         :param path: A string representing the path to the .dez file.
         :return: A pandas DataFrame representing the labels in the .dez file.
-        """ 
+        """
         if 'dez' not in self._analyses:
             if not path:
-                print('No path was provided and no prior analysis was found. Please provide a path to a .dez file.')
+                print(
+                    'No path was provided and no prior analysis was found. Please provide a path to a .dez file.')
                 return
             elif not path.endswith('.dez'):
                 print('The file provided is not a .dez file.')
@@ -1205,7 +1321,8 @@ class Score:
                 df = dez.set_index('start').rename_axis(None)
                 df = df.loc[(df['type'] == 'Harmony'), 'tag']
                 if df.empty:
-                    print('No "Harmony" analysis was found in the .dez file, checking for a **harm spine.')
+                    print(
+                        'No "Harmony" analysis was found in the .dez file, checking for a **harm spine.')
                 else:
                     return snapTo(df, snap_to, filler, output)
         if 'harm' in self._analyses and len(self._analyses['harm']):
@@ -1214,37 +1331,11 @@ class Score:
         key = self.score.analyze('key')
         chords = self.score.chordify().recurse().getElementsByClass('Chord')
         offsets = [ch.offset for ch in chords]
-        figures = [m21.roman.romanNumeralFromChord(ch, key).figure for ch in chords]
+        figures = [m21.roman.romanNumeralFromChord(
+            ch, key).figure for ch in chords]
         ser = pd.Series(figures, index=offsets, name='Roman Numerals')
         ser = ser[ser != ser.shift()]   # remove consecutive duplicates
         return snapTo(ser, snap_to, filler, output)
-
-    def tony(self, path=''):
-        """
-        Get the labels data from a .tony file/url and return it as a dataframe. Calls
-        fromJSON to do this. The "meta" portion of the tony file is ignored. If no
-        path is provided, the last tony table imported with this method is returned.
-
-        :param path: A string representing the path to the .tony file.
-        :return: A pandas DataFrame representing the labels in the .tony file.
-        """
-        if 'tony' not in self._analyses:
-            if not path:
-                print('No path was provided and no prior analysis was found. Please provide a path to a .tony file.')
-                return
-            elif not path.endswith('.tony'):
-                print('The file provided is not a .tony file.')
-                return
-            elif not path.startswith('http') and not os.path.exists(path):
-                print('The file provided does not exist.')
-                return
-            else:
-                self._analyses['tony'] = {path: fromJSON(path)}
-        else:
-            if not path:   # return the last tony table
-                return next(reversed(self._analyses['tony'].values()))
-
-        return next(reversed(self._analyses['tony'].values()))
 
     def _m21ObjectsNoTies(self):
         """
@@ -1255,7 +1346,8 @@ class Score:
         :return: A list of music21 objects with ties removed.
         """
         if '_m21ObjectsNoTies' not in self._analyses:
-            self._analyses['_m21ObjectsNoTies'] = self._parts(multi_index=True).map(removeTied).dropna(how='all')
+            self._analyses['_m21ObjectsNoTies'] = self._parts(
+                multi_index=True).map(removeTied).dropna(how='all')
         return self._analyses['_m21ObjectsNoTies']
 
     def _measures(self, compact=False):
@@ -1272,9 +1364,11 @@ class Score:
             partCols = self._parts(compact=compact).columns
             partMeasures = []
             for i, part in enumerate(self._flatParts):
-                meas = {m.offset: m.measureNumber for m in part.makeMeasures() if isinstance(m, m21.stream.Measure)}
+                meas = {m.offset: m.measureNumber for m in part.makeMeasures(
+                ) if isinstance(m, m21.stream.Measure)}
                 ser = [pd.Series(meas, dtype='Int16')]
-                voiceCount = len([col for col in partCols if col.startswith(self.partNames[i])])
+                voiceCount = len(
+                    [col for col in partCols if col.startswith(self.partNames[i])])
                 partMeasures.extend(ser * voiceCount)
             df = pd.concat(partMeasures, axis=1)
             df.columns = partCols
@@ -1294,7 +1388,7 @@ class Score:
         """
         if "_barlines" not in self._analyses:
             partBarlines = [pd.Series({bar.offset: bar.type for bar in part.getElementsByClass(['Barline'])})
-                                            for i, part in enumerate(self._flatParts)]
+                            for i, part in enumerate(self._flatParts)]
             df = pd.concat(partBarlines, axis=1, sort=True)
             df.columns = self.partNames
             self._analyses["_barlines"] = df
@@ -1313,10 +1407,12 @@ class Score:
         if ('_keySignatures', kern) not in self._analyses:
             kSigs = []
             for i, part in enumerate(self._flatParts):
-                kSigs.append(pd.Series({ky.offset: ky for ky in part.getElementsByClass(['KeySignature'])}, name=self.partNames[i]))          
+                kSigs.append(pd.Series({ky.offset: ky for ky in part.getElementsByClass(
+                    ['KeySignature'])}, name=self.partNames[i]))
             df = pd.concat(kSigs, axis=1).sort_index(kind='mergesort')
             if kern:
-                df = '*k[' + df.map(lambda ky: ''.join([_note.name for _note in ky.alteredPitches]).lower(), na_action='ignore') + ']'
+                df = '*k[' + df.map(lambda ky: ''.join(
+                    [_note.name for _note in ky.alteredPitches]).lower(), na_action='ignore') + ']'
             self._analyses[('_keySignatures', kern)] = df
         return self._analyses[('_keySignatures', kern)]
 
@@ -1332,9 +1428,11 @@ class Score:
             tsigs = []
             for i, part in enumerate(self._flatParts):
                 if not ratio:
-                    tsigs.append(pd.Series({ts.offset: ts for ts in part.getTimeSignatures()}, name=self.partNames[i]))
+                    tsigs.append(pd.Series(
+                        {ts.offset: ts for ts in part.getTimeSignatures()}, name=self.partNames[i]))
                 else:
-                    tsigs.append(pd.Series({ts.offset: ts.ratioString for ts in part.getTimeSignatures()}, name=self.partNames[i]))
+                    tsigs.append(pd.Series(
+                        {ts.offset: ts.ratioString for ts in part.getTimeSignatures()}, name=self.partNames[i]))
             df = pd.concat(tsigs, axis=1).sort_index(kind='mergesort')
             self._analyses[('_timeSignatures', ratio)] = df
         return self._analyses[('_timeSignatures', ratio)]
@@ -1370,7 +1468,8 @@ class Score:
             key = ('durations', multi_index)
             if key not in self._analyses:
                 m21objs = self._m21ObjectsNoTies()
-                res = m21objs.map(lambda nrc: nrc.quarterLength, na_action='ignore').astype(float).round(5)
+                res = m21objs.map(lambda nrc: nrc.quarterLength,
+                                  na_action='ignore').astype(float).round(5)
                 if not multi_index and isinstance(res.index, pd.MultiIndex):
                     res = res.droplevel(1)
                 self._analyses[key] = res
@@ -1392,6 +1491,91 @@ class Score:
                 res = res.droplevel(1)
             res.columns = df.columns
             return res
+
+    def midi_ticks_durations(self, i=1, df=None):
+        """
+        Replaces the placeholder ONSET_SEC and OFFSET_SEC columns with specific placements calculated by MIDI
+        tick information. The method translates the music21 stream to MIDI and replaces the values accordingly
+
+        See Also
+        --------
+        :meth:`notes`
+            Return a DataFrame of the newly calculated ONSET_SEC and OFFSET_SEC times, and DURATION
+
+        Example
+        -------
+        .. code-block:: python
+
+            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece.durations()
+        """
+
+        # Convert music21 stream to MIDI
+        i = 1
+        midi_file = []
+        mf = m21.midi.translate.music21ObjectToMidiFile(self.score)
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mid') as temp_midi_file:
+            mf.open(temp_midi_file.name, 'wb')
+            mf.write()
+            mf.close()
+            midi_file = temp_midi_file.name
+        mid = mido.MidiFile(midi_file)
+        # Logic from durations_from_midi_ticks
+        onsOffsList = []
+
+        # Default PPQN and tempo values
+        ppqn = 9600
+        current_tempo = 500000
+
+        # Check for tempo metadata in the MIDI file
+        for track in mid.tracks:
+            for msg in track:
+                if msg.type == 'set_tempo':
+                    current_tempo = msg.tempo
+                    break  # No need to check further messages in the same track
+
+        # Convert ticks per beat to seconds per tick
+        seconds_per_tick = current_tempo / (1_000_000 * ppqn)
+
+        # Check if index is out of range
+        if i >= len(mid.tracks):
+            print(
+                f"Index {i} is out of range. Total number of tracks is {len(mid.tracks)}.")
+            return df
+
+        # for track in mid.tracks:
+        cum_time = 0
+
+        for msg in mid.tracks[i]:
+            if msg.type == 'end_of_track':
+                break  # Stop processing this track upon encountering end_of_track
+            cum_time += msg.time
+
+            if msg.type == 'note_on' and msg.velocity > 0:
+                note = msg.note
+                velocity = msg.velocity
+                start_time = cum_time * seconds_per_tick
+                onsOffsList.append([start_time, 0])
+
+            if msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+                for event in reversed(onsOffsList):
+                    if event[1] == 0 and event[0] <= cum_time * seconds_per_tick:
+                        end_time = cum_time * seconds_per_tick
+                        event[1] = end_time
+                        break
+        # Replace values in DataFrame
+        onsOffsList = truncate_and_scale_onsOffsList(
+            onsOffsList, len(df.index))
+
+        res = pd.DataFrame(
+            onsOffsList, columns=['ONSET_SEC', 'OFFSET_SEC'], index=df.index)
+
+        # Update the columns with new values from `res`
+        df['ONSET_SEC'] = res['ONSET_SEC']
+        df['OFFSET_SEC'] = res['OFFSET_SEC']
+        df['DURATION'] = (res['ONSET_SEC'] - res['OFFSET_SEC']) * -1
+
+        return df
 
     def contextualize(self, df, offsets=True, measures=True, beats=True):
         """
@@ -1417,7 +1601,8 @@ class Score:
             toConcat.append(meas)
             cols.append('Measure')
         if beats:
-            bts = self._beats().apply(lambda row: row[row.first_valid_index()], axis=1)
+            bts = self._beats().apply(
+                lambda row: row[row.first_valid_index()], axis=1)
             bts = bts.loc[~bts.index.duplicated(keep='last')]
             bts.name = 'Beat'
             toConcat.append(bts)
@@ -1442,7 +1627,8 @@ class Score:
             numbers.
         """
         if '_beats' not in self._analyses:
-            df = self._parts(compact=True).map(lambda obj: obj.beat, na_action='ignore')
+            df = self._parts(compact=True).map(
+                lambda obj: obj.beat, na_action='ignore')
             self._analyses['_beats'] = df
         return self._analyses['_beats']
 
@@ -1475,7 +1661,8 @@ class Score:
         """
         key = ('midiPitches', multi_index)
         if key not in self._analyses:
-            midiPitches = self._m21ObjectsNoTies().map(lambda nr: -1 if nr.isRest else nr.pitch.midi, na_action='ignore')
+            midiPitches = self._m21ObjectsNoTies().map(
+                lambda nr: -1 if nr.isRest else nr.pitch.midi, na_action='ignore')
             if not multi_index and isinstance(midiPitches.index, pd.MultiIndex):
                 midiPitches = midiPitches.droplevel(1)
             self._analyses[key] = midiPitches
@@ -1546,7 +1733,8 @@ class Score:
             piece.kernNotes()
         """
         if 'kernNotes' not in self._analyses:
-            self._analyses['kernNotes'] = self._parts(True, True).map(kernNRCHelper, na_action='ignore')
+            self._analyses['kernNotes'] = self._parts(
+                True, True).map(kernNRCHelper, na_action='ignore')
         return self._analyses['kernNotes']
 
     def nmats(self, json_path=None, include_cdata=False):
@@ -1555,9 +1743,9 @@ class Score:
         about the notes and rests in that voice.
 
         Each DataFrame has the following columns:
-        
+
         MEASURE  ONSET  DURATION  PART  MIDI  ONSET_SEC  OFFSET_SEC
-        
+
         In the MIDI column, notes are represented 
         with their MIDI pitch numbers (0 to 127), and rests are represented with -1s. 
         The ONSET_SEC and OFFSET_SEC columns are taken from the audio analysis from 
@@ -1600,32 +1788,50 @@ class Score:
                 elif json_path.lower().endswith('.csv'):
                     data = pd.read_csv(githubURLtoRaw(json_path), header=None)
                     col_names = ('ONSET_SEC', 'MIDI', 'DURATION')
-                    data.columns = col_names[:len(data.columns)]   # sometimes these files only have two columns instead of three
-                    data['MIDI'] = data['MIDI'].map(librosa.hz_to_midi, na_action='ignore').round().astype('Int16')
+                    # sometimes these files only have two columns instead of three
+                    data.columns = col_names[:len(data.columns)]
+                    data['MIDI'] = data['MIDI'].map(
+                        librosa.hz_to_midi, na_action='ignore').round().astype('Int16')
 
             if isinstance(ids.index, pd.MultiIndex):
                 ms.index = pd.MultiIndex.from_product((ms.index, (0,)))
             for i, partName in enumerate(self._parts().columns):
                 meas = ms.iloc[:, i]
                 midi = mp.iloc[:, i].dropna()
-                onsetBeat = pd.Series(midi.index.get_level_values(0), index=midi.index, dtype='float64')
+                onsetBeat = pd.Series(midi.index.get_level_values(
+                    0), index=midi.index, dtype='float64')
                 durBeat = dur.iloc[:, i].dropna()
                 part = pd.Series(partName, midi.index, dtype='string')
                 xmlID = ids.iloc[:, i].dropna()
-                onsetSec = onsetBeat.copy()
-                offsetSec = onsetBeat + durBeat
-                df = pd.concat([meas, onsetBeat, durBeat, part, midi, onsetSec, offsetSec, xmlID], axis=1, sort=True)
-                df.columns = ['MEASURE', 'ONSET', 'DURATION', 'PART', 'MIDI', 'ONSET_SEC', 'OFFSET_SEC', 'XML_ID']
+                if self.fileExtension == 'csv':
+                    csv_data = self._analyses['tony_csv']
+                    csv_data.index = part.index
+                    onsetSec = csv_data['ONSET_SEC']
+                    offsetSec = csv_data['ONSET_SEC'] + csv_data['DURATION']
+                else:
+                    onsetSec = onsetBeat.copy()  # This is overwritten by midiTicks function
+                    offsetSec = onsetBeat + durBeat  # This is overwritten by midiTicks function
+                df = pd.concat([meas, onsetBeat, durBeat, part, midi,
+                               onsetSec, offsetSec, xmlID], axis=1, sort=True)
+                df.columns = ['MEASURE', 'ONSET', 'DURATION', 'PART',
+                              'MIDI', 'ONSET_SEC', 'OFFSET_SEC', 'XML_ID']
                 df['MEASURE'] = df['MEASURE'].ffill()
                 df.dropna(how='all', inplace=True, subset=df.columns[1:5])
                 df = df.set_index('XML_ID')
+
+                # Remove rows where MIDI == -1.0
+                df = df[df['MIDI'] != -1.0]
+
+                df = self.midi_ticks_durations(i+1, df)
                 if json_path is not None:   # add json data if a json_path is provided
                     if len(data.index) > len(df.index):
                         data = data.iloc[:len(df.index), :]
-                        print('\n\n*** Warning ***\n\nThe json data has more observations than there are notes in this part so the data was truncated.\n')
+                        print(
+                            '\n\n*** Warning ***\n\nThe json data has more observations than there are notes in this part so the data was truncated.\n')
                     elif len(data.index) < len(df.index):
                         df = df.iloc[:len(data.index), :]
-                        print('\n\n*** Warning ***\n\nThere are more events than there are json records in this part.\n')
+                        print(
+                            '\n\n*** Warning ***\n\nThere are more events than there are json records in this part.\n')
                     data.index = df.index
                     if json_path.lower().endswith('.json'):
                         df.iloc[:len(data.index), 5] = data.index
@@ -1641,7 +1847,6 @@ class Score:
                         if 'DURATION' in data.columns:
                             df.OFFSET_SEC = df.ONSET_SEC + data['DURATION']
                         included[partName] = df
-
                 nmats[partName] = df
             self._analyses[('nmats', json_path, False)] = nmats
             if json_path:
@@ -1681,7 +1886,8 @@ class Score:
         """
         if 'pianoRoll' not in self._analyses:
             mp = self.midiPitches()
-            mp = mp[~mp.index.duplicated(keep='last')].ffill()  # remove non-last offset repeats and forward-fill
+            # remove non-last offset repeats and forward-fill
+            mp = mp[~mp.index.duplicated(keep='last')].ffill()
             pianoRoll = pd.DataFrame(index=range(128), columns=mp.index.values)
             for offset in mp.index:
                 for pitch in mp.loc[offset]:
@@ -1691,7 +1897,7 @@ class Score:
             self._analyses['pianoRoll'] = pianoRoll
         return self._analyses['pianoRoll']
 
-    def sampled(self, bpm=60, obs=20):
+    def sampled(self, bpm=60, obs=24):
         """
         Sample the score according to the given beats per minute (bpm) and the 
         desired observations per second (obs). This method is primarily used as an
@@ -1703,7 +1909,7 @@ class Score:
         time intervals, rather than at each new event as they are in the pianoRoll.
 
         :param bpm: Integer, default 60. The beats per minute to use for sampling.
-        :param obs: Integer, default 20. The desired observations per second.
+        :param obs: Integer, default 24. The desired observations per second.
         :return: A DataFrame representing the sampled score. Each row corresponds 
             to a MIDI pitch (0 to 127), and each column corresponds to a timepoint 
             in the sampled score. The values are 1 for a note onset and 0 otherwise.
@@ -1723,9 +1929,11 @@ class Score:
         key = ('sampled', bpm, obs)
         if key not in self._analyses:
             slices = 60/bpm * obs
-            timepoints = pd.Index([t/slices for t in range(0, int(self.score.highestTime * slices))])
+            timepoints = pd.Index(
+                [t/slices for t in range(0, int(self.score.highestTime * slices))])
             pr = self.pianoRoll().copy()
-            pr.columns = [col if col in timepoints else timepoints.asof(col) for col in pr.columns]
+            pr.columns = [col if col in timepoints else timepoints.asof(
+                col) for col in pr.columns]
             pr = pr.T
             pr = pr.iloc[~pr.index.duplicated(keep='last')]
             pr = pr.T
@@ -1734,14 +1942,14 @@ class Score:
         return self._analyses[key]
 
     def mask(self, winms=100, sample_rate=2000, num_harmonics=1, width=0,
-                    bpm=60, aFreq=440, base_note=0, tuning_factor=1, obs=20):
+             bpm=60, aFreq=440, base_note=0, tuning_factor=1, obs=24):
         """
         Construct a mask from the sampled piano roll using width and harmonics. This
         builds on the intermediate representations of the pianoRoll and sampled
         methods. The sampled method already put the x-axis (columns) in regular
         time intervals. The mask keeps these columns and then alters the y-axis (rows)
         into frequency bins. The number of bins is determined by the winms and sample_rate
-        values, and is equal to some power of 2 plus 1. The frequency bins serve to "blur"
+        values, and is˚ equal to some power of 2 plus 1. The frequency bins serve to "blur"
         the sampled pitch data that we expect from the score. This allows us to detect
         real performed sounds in audio recordings that are likely slightly above or below
         the precise notated pitches. The mask is what allows pyAMPACT to connect
@@ -1759,7 +1967,7 @@ class Score:
         :param aFreq: Integer, default 440. The frequency of A4 in Hz.
         :param base_note: Integer, default 0. The base MIDI note to use.
         :param tuning_factor: Float, default 1. The tuning factor to use.
-        :param obs: Integer, default 20. The desired observations per second.
+        :param obs: Integer, default 24. The desired observations per second.
         :return: A DataFrame representing the mask. Each row corresponds to a 
             frequency bin, and each column corresponds to a timepoint in the 
             sampled score. The values are 1 for a note onset and 0 otherwise.
@@ -1776,27 +1984,35 @@ class Score:
             piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.mask()
         """
-        key = ('mask', winms, sample_rate, num_harmonics, width, bpm, aFreq, base_note, tuning_factor)
+        key = ('mask', winms, sample_rate, num_harmonics,
+               width, bpm, aFreq, base_note, tuning_factor)
         if key not in self._analyses:
             width_semitone_factor = 2 ** ((width / 2) / 12)
             sampled = self.sampled(bpm, obs)
-            num_rows = int(2 ** round(math.log(winms / 1000 * sample_rate) / math.log(2) - 1)) + 1
-            mask = pd.DataFrame(index=range(num_rows), columns=sampled.columns).infer_objects(copy=False).fillna(0)
-            fftlen = 2**round(math.log(winms / 1000 * sample_rate) / math.log(2))            
+            num_rows = int(
+                2 ** round(math.log(winms / 1000 * sample_rate) / math.log(2) - 1)) + 1
+            mask = pd.DataFrame(index=range(
+                num_rows), columns=sampled.columns).infer_objects(copy=False).fillna(0)
+            fftlen = 2**round(math.log(winms / 1000 *
+                              sample_rate) / math.log(2))
 
             for row in range(base_note, sampled.shape[0]):
                 note = base_note + row
                 # MIDI note to Hz: MIDI 69 = 440 Hz = A4
-                freq = tuning_factor * (2 ** (note / 12)) * aFreq / (2 ** (69 / 12))
+                freq = tuning_factor * \
+                    (2 ** (note / 12)) * aFreq / (2 ** (69 / 12))
                 if sampled.loc[row, :].sum() > 0:
                     mcol = pd.Series(0, index=range(num_rows))
                     for harm in range(1, num_harmonics + 1):
-                        minbin = math.floor(harm * freq / width_semitone_factor / sample_rate * fftlen)
-                        maxbin = math.ceil(harm * freq * width_semitone_factor / sample_rate * fftlen)
+                        minbin = math.floor(
+                            harm * freq / width_semitone_factor / sample_rate * fftlen)
+                        maxbin = math.ceil(
+                            harm * freq * width_semitone_factor / sample_rate * fftlen)
                         if minbin <= num_rows:
                             maxbin = min(maxbin, num_rows)
-                            mcol.loc[minbin : maxbin] = 1
-                    mask.iloc[np.where(mcol)[0], np.where(sampled.iloc[row])[0]] = 1
+                            mcol.loc[minbin: maxbin] = 1
+                    mask.iloc[np.where(mcol)[0], np.where(
+                        sampled.iloc[row])[0]] = 1
             self._analyses[key] = mask
         return self._analyses[key]
 
@@ -1838,7 +2054,7 @@ class Score:
             self._analyses[key] = post
         return self._analyses[key]
 
-    def insertAudioAnalysis(self, output_filename, data, mimetype='', target='', mei_tree=None):
+    def insertAudioAnalysis(self, output_path, data, mimetype='', target='', mei_tree=None):
         """
         Insert a <performance> element into the MEI score given the analysis data 
         (`data`) in the format of a json file or an nmat dictionary with audio data
@@ -1900,7 +2116,8 @@ class Score:
                 target='Close to You vocals.wav')
         """
         performance = ET.Element('performance', {'xml:id': next(idGen)})
-        recording = ET.SubElement(performance, 'recording', {'xml:id': next(idGen)})
+        recording = ET.SubElement(performance, 'recording', {
+                                  'xml:id': next(idGen)})
         avFile = ET.SubElement(recording, 'avFile', {'xml:id': next(idGen)})
         if mimetype:
             avFile.set('mimetype', mimetype)
@@ -1910,8 +2127,10 @@ class Score:
             jsonCDATA = data
             for part_name, part_df in jsonCDATA.items():
                 for i, ndx in enumerate(part_df.index):
-                    when = ET.SubElement(recording, 'when', {'absolute': part_df.at[ndx, 'ONSET_SEC'], 'xml:id': next(idGen), 'data': f'#{ndx}'})
-                    extData = ET.SubElement(when, 'extData', {'xml:id': next(idGen)})
+                    when = ET.SubElement(recording, 'when', {
+                                         'absolute': part_df.at[ndx, 'ONSET_SEC'], 'xml:id': next(idGen), 'data': f'#{ndx}'})
+                    extData = ET.SubElement(
+                        when, 'extData', {'xml:id': next(idGen)})
                     extData.text = f' <![CDATA[ {json.dumps(part_df.iloc[i, 1:].to_dict())} ]]> '
         else:
             jsonCDATA = self.jsonCDATA(data)
@@ -1921,8 +2140,9 @@ class Score:
             mei_tree = self._meiTree
         musicEl = mei_tree.find('.//music')
         musicEl.insert(0, performance)
-        if not output_filename.endswith('.mei.xml'):
-            output_filename = output_filename.split('.', 1)[0] + '.mei.xml'
+        # if not output_path.endswith('.mei.xml'):
+        #     output_path = output_path.split('.', 1)[0] + '.mei.xml'
+
         indentMEI(self._meiTree.getroot())
         # get header/xml descriptor from original file
         lines = []
@@ -1935,16 +2155,18 @@ class Score:
             header = ''.join(lines)
         else:
             convert_attribs_to_str(self._meiTree.getroot())
-            xml_string = ET.tostring(self._meiTree.getroot(), encoding='unicode')
+            xml_string = ET.tostring(
+                self._meiTree.getroot(), encoding='unicode')
             score_lines = xml_string.split('\n')
             for line in score_lines:
                 if '<mei ' in line:
                     break
                 lines.append(line)
         header = ''.join(lines)
-        with open(f'./{output_filename}', 'w') as f:
+        with open(f'{output_path}', 'w') as f:
             f.write(header)
-            ET.ElementTree(self._meiTree.getroot()).write(f, encoding='unicode')
+            ET.ElementTree(self._meiTree.getroot()).write(
+                f, encoding='unicode')
 
     def show(self, start=None, stop=None):
         """
@@ -2032,7 +2254,8 @@ class Score:
         """
         key = ('toKern', data)
         if key not in self._analyses:
-            me = self._measures().map(lambda cell: f'={cell}-' if cell == 0 else f'={cell}', na_action='ignore')
+            me = self._measures().map(
+                lambda cell: f'={cell}-' if cell == 0 else f'={cell}', na_action='ignore')
             events = self.kernNotes()
             isMI = isinstance(events.index, pd.MultiIndex)
             includeLyrics, includeDynamics = False, False
@@ -2040,17 +2263,22 @@ class Score:
                 includeLyrics = True
                 lyr = self.lyrics()
                 if isMI:
-                    lyr.index = pd.MultiIndex.from_arrays((lyr.index, [0]*len(lyr.index)))
+                    lyr.index = pd.MultiIndex.from_arrays(
+                        (lyr.index, [0]*len(lyr.index)))
             if dynamics and not self.dynamics().empty:
                 includeDynamics = True
                 dyn = self.dynamics()
                 if isMI:
-                    dyn.index = pd.MultiIndex.from_arrays((dyn.index, [0]*len(dyn.index)))
-            _cols, firstTokens, partNumbers, staves, instruments, partNames, shortNames = [], [], [], [], [], [], []
-            for i in range(len(events.columns), 0, -1):   # reverse column order because kern order is lowest staves on the left
+                    dyn.index = pd.MultiIndex.from_arrays(
+                        (dyn.index, [0]*len(dyn.index)))
+            _cols, firstTokens, partNumbers, staves, instruments, partNames, shortNames = [
+            ], [], [], [], [], [], []
+            # reverse column order because kern order is lowest staves on the left
+            for i in range(len(events.columns), 0, -1):
                 col = events.columns[i - 1]
                 _cols.append(events[col])
-                partNum = self.partNames.index(col) + 1 if col in self.partNames else -1
+                partNum = self.partNames.index(
+                    col) + 1 if col in self.partNames else -1
                 firstTokens.append('**kern')
                 partNumbers.append(f'*part{partNum}')
                 staves.append(f'*staff{partNum}')
@@ -2073,7 +2301,8 @@ class Score:
                     staves.append(f'*staff{partNum}')
             events = pd.concat(_cols, axis=1)
             ba = self._barlines()
-            ba = ba[ba != 'regular'].dropna().replace({'double': '||', 'final': '=='})
+            ba = ba[ba != 'regular'].dropna().replace(
+                {'double': '||', 'final': '=='})
             ba.loc[self.score.highestTime, :] = '=='
             if data:
                 cdata = fromJSON(data).reset_index(drop=True)
@@ -2096,7 +2325,7 @@ class Score:
             ks = self._keySignatures()
             ks = ks.reindex(events.columns, axis=1).fillna('*')
             partTokens = pd.DataFrame([firstTokens, partNumbers, staves, instruments, partNames, shortNames, ['*-']*len(events.columns)],
-                    index=[-12, -11, -10, -9, -8, -7, int(self.score.highestTime + 1)]).fillna('*')
+                                      index=[-12, -11, -10, -9, -8, -7, int(self.score.highestTime + 1)]).fillna('*')
             partTokens.columns = events.columns
             to_concat = [partTokens, de, me, ds, clefs, ks, ts, events, ba]
             if isinstance(events.index, pd.MultiIndex):
@@ -2113,12 +2342,15 @@ class Score:
                     if _ii == 0:  # delete everying in target cols up to first divisi
                         body.iloc[:startRow + 1, colIndex] = np.nan
                     else:  # delete everything from the last divisi consolidation to this new divisi
-                        body.iloc[divEnds[_ii - 1] + 1: startRow + 1, colIndex] = np.nan
-                    if _ii + 1 == len(divStarts) and _ii < len(divEnds):  # delete everything in target cols after final consolidation
+                        body.iloc[divEnds[_ii - 1] +
+                                  1: startRow + 1, colIndex] = np.nan
+                    # delete everything in target cols after final consolidation
+                    if _ii + 1 == len(divStarts) and _ii < len(divEnds):
                         body.iloc[divEnds[_ii] + 1:, colIndex] = np.nan
 
             result = [kernHeader(self.metadata)]
-            result.extend(body.apply(lambda row: '\t'.join(row.dropna().astype(str)), axis=1))
+            result.extend(body.apply(lambda row: '\t'.join(
+                row.dropna().astype(str)), axis=1))
             result.extend((kernFooter(self.fileExtension),))
             result = '\n'.join(result)
             self._analyses[key] = result
@@ -2148,11 +2380,13 @@ class Score:
             clefs = self._m21Clefs().copy()
             ksigs = self._keySignatures(False).copy()
             tsigs = self._timeSignatures(ratio=False).copy()
-            mi = pd.MultiIndex.from_tuples([(x, 1) for x in range(1, len(clefs.columns) + 1)], names=['Staff', 'Layer'])
+            mi = pd.MultiIndex.from_tuples([(x, 1) for x in range(
+                1, len(clefs.columns) + 1)], names=['Staff', 'Layer'])
             for i, staffInfo in enumerate((clefs, ksigs, tsigs)):
                 if 0.0 in staffInfo.index:
                     staffInfo.drop(0.0, inplace=True)
-                staffInfo.index = pd.MultiIndex.from_product([staffInfo.index, [i - 9]])
+                staffInfo.index = pd.MultiIndex.from_product(
+                    [staffInfo.index, [i - 9]])
                 staffInfo.columns = mi
 
             me = self._measures(compact=True)
@@ -2168,16 +2402,41 @@ class Score:
                     ki = ksigs.loc[:, partName].dropna()
                     ti = tsigs.loc[:, partName].dropna()
                     ei = pd.concat((ci, ki, ti, ei)).sort_index()
-                mi.index = mi.index.set_levels([-10], level=1)   # force measures to come before any grace notes. # TODO: check case of nachschlag grace notes
+                # force measures to come before any grace notes. # TODO: check case of nachschlag grace notes
+                mi.index = mi.index.set_levels([-10], level=1)
                 part = pd.concat((ei, mi), axis=1)
                 part = part.dropna(how='all').sort_index(level=[0, 1])
                 part.Measure = part.Measure.ffill()
                 parts.append(part.set_index('Measure', append=True))
             df = pd.concat(parts, axis=1).sort_index().droplevel([0, 1])
             df.columns = events.columns
-            stack = df.stack((0, 1), future_stack=True).dropna().sort_index(level=[0, 1, 2])
+            stack = df.stack((0, 1), future_stack=True).dropna(
+            ).sort_index(level=[0, 1, 2])
             self._analyses['_meiStack'] = stack
         return self._analyses['_meiStack']
+
+    def _coreMEIElements(self):
+        root = ET.Element(
+            'mei', {'xmlns': 'http://www.music-encoding.org/ns/mei', 'meiversion': '5.1-dev'})
+
+        meiHead = ET.SubElement(root, 'meiHead')
+        fileDesc = ET.SubElement(meiHead, 'fileDesc')
+        titleStmt = ET.SubElement(fileDesc, 'titleStmt')
+        title = ET.SubElement(titleStmt, 'title')
+        title.text = self.metadata['title']
+        composer = ET.SubElement(titleStmt, 'composer')
+        composer.text = self.metadata['composer']
+        pubStmt = ET.SubElement(fileDesc, 'pubStmt')
+        unpub = ET.SubElement(pubStmt, 'unpub')
+        unpub.text = f'This mei file was converted from a .{self.fileExtension} file by pyAMPACT'
+        music = ET.SubElement(root, 'music')
+        # insert performance element here
+        body = ET.SubElement(music, 'body')
+        mdiv = ET.SubElement(body, 'mdiv')
+        score = ET.SubElement(mdiv, 'score')
+        section = ET.SubElement(score, 'section')
+        self.insertScoreDef(root)
+        return root
 
     def toMEI(self, file_name='', indentation='\t', data='', start=None, stop=None, dfs=None, analysis_tag='annot'):
         """
@@ -2219,26 +2478,8 @@ class Score:
         if isinstance(dfs, pd.DataFrame):
             dfs = {'analysis': dfs}
         if key not in self._analyses:
-            root = ET.Element('mei', {'xmlns': 'http://www.music-encoding.org/ns/mei', 'meiversion': '5.1-dev'})
-            
-            meiHead = ET.SubElement(root, 'meiHead')
-            fileDesc = ET.SubElement(meiHead, 'fileDesc')
-            titleStmt = ET.SubElement(fileDesc, 'titleStmt')
-            title = ET.SubElement(titleStmt, 'title')
-            title.text = self.metadata['title']
-            composer = ET.SubElement(titleStmt, 'composer')
-            composer.text = self.metadata['composer']
-            pubStmt = ET.SubElement(fileDesc, 'pubStmt')
-            unpub = ET.SubElement(pubStmt, 'unpub')
-            unpub.text = f'This mei file was converted from a .{self.fileExtension} file by pyAMPACT'
-            music = ET.SubElement(root, 'music')
-            # insert performance element here
-            body = ET.SubElement(music, 'body')
-            mdiv = ET.SubElement(body, 'mdiv')
-            score = ET.SubElement(mdiv, 'score')
-            section = ET.SubElement(score, 'section')
-            self.insertScoreDef(root)
-
+            root = self._coreMEIElements()
+            section = root.find('.//section')
             stack = self._meiStack()
             if isinstance(start, int) or isinstance(stop, int):
                 stack = stack.copy()
@@ -2251,22 +2492,26 @@ class Score:
             uniqueStaves = stack.index.get_level_values(1).unique()
             uniqueLayers = stack.index.get_level_values(2).unique()
             for measure in stack.index.get_level_values(0).unique():
-                meas_el = ET.SubElement(section, 'measure', {'n': f'{measure}'})
+                meas_el = ET.SubElement(
+                    section, 'measure', {'n': f'{measure}'})
                 for staff in uniqueStaves:
-                    staff_el = ET.SubElement(meas_el, 'staff', {'n': f'{staff}'})
+                    staff_el = ET.SubElement(
+                        meas_el, 'staff', {'n': f'{staff}'})
                     for layer in uniqueLayers:
                         if (measure, staff, layer) not in stack.index:
                             continue
-                        layer_el = ET.SubElement(staff_el, 'layer', {'n': f'{layer}'})
+                        layer_el = ET.SubElement(
+                            staff_el, 'layer', {'n': f'{layer}'})
                         parent = layer_el
                         for el in stack.loc[[(measure, staff, layer)]].values:
                             if hasattr(el, 'beams') and el.beams.beamsList and el.beams.beamsList[0].type == 'start':
-                                    parent = ET.SubElement(layer_el, 'beam', {'xml:id': next(idGen)})
+                                parent = ET.SubElement(
+                                    layer_el, 'beam', {'xml:id': next(idGen)})
                             if hasattr(el, 'isNote') and el.isNote:
                                 addMEINote(el, parent)
                             elif hasattr(el, 'isRest') and el.isRest:
                                 rest_el = ET.SubElement(parent, 'rest', {'xml:id': f'{el.id}',
-                                    'dur': duration2MEI[el.duration.type], 'dots': f'{el.duration.dots}'})
+                                                                         'dur': duration2MEI[el.duration.type], 'dots': f'{el.duration.dots}'})
                             elif hasattr(el, 'isChord') and el.isChord:
                                 chord_el = ET.SubElement(parent, 'chord')
                                 for note in el.notes:
@@ -2275,28 +2520,34 @@ class Score:
                                 for exp in el.expressions:
                                     if exp.name == 'fermata':
                                         ferm_el = ET.SubElement(meas_el, 'fermata',
-                                                {'xml:id': next(idGen), 'startid': parent[-1].get('xml:id')})
+                                                                {'xml:id': next(idGen), 'startid': parent[-1].get('xml:id')})
                             if hasattr(el, 'getSpannerSites'):
                                 for spanner in el.getSpannerSites():
                                     if isinstance(spanner, m21.spanner.Slur) and el == spanner[0]:
                                         ET.SubElement(meas_el, 'slur', {'xml:id': next(idGen),
-                                                'startid': f'{el.id}', 'endid': f'{spanner.getLast().id}'})
+                                                                        'startid': f'{el.id}', 'endid': f'{spanner.getLast().id}'})
                             if hasattr(el, 'beams') and el.beams.beamsList and el.beams.beamsList[0].type == 'stop':
                                 parent = layer_el
                                 continue
 
                             if isinstance(el, m21.clef.Clef):
-                                clef_el = ET.SubElement(parent, 'clef', {'xml:id': next(idGen), 'shape': el.sign, 'line': f'{el.line}'})
+                                clef_el = ET.SubElement(parent, 'clef', {'xml:id': next(
+                                    idGen), 'shape': el.sign, 'line': f'{el.line}'})
                             elif isinstance(el, m21.meter.TimeSignature):
-                                attrs_el = ET.SubElement(parent, 'attributes', {'xml:id': next(idGen)})
-                                tsig_el = ET.SubElement(attrs_el, 'time', {'xml:id': next(idGen)})
+                                attrs_el = ET.SubElement(parent, 'attributes', {
+                                                         'xml:id': next(idGen)})
+                                tsig_el = ET.SubElement(
+                                    attrs_el, 'time', {'xml:id': next(idGen)})
                                 numerator_el = ET.SubElement(tsig_el, 'beats')
                                 numerator_el.text = f'{el.numerator}'
-                                denominator_el = ET.SubElement(tsig_el, 'beatType')
+                                denominator_el = ET.SubElement(
+                                    tsig_el, 'beatType')
                                 denominator_el.text = f'{el.denominator}'
                             elif isinstance(el, m21.key.KeySignature):
-                                score_def_el = ET.Element('scoreDef', {'xml:id': next(idGen)})
-                                key_sig_el = ET.SubElement(score_def_el, 'keySig', {'xml:id': next(idGen)})
+                                score_def_el = ET.Element(
+                                    'scoreDef', {'xml:id': next(idGen)})
+                                key_sig_el = ET.SubElement(score_def_el, 'keySig', {
+                                                           'xml:id': next(idGen)})
                                 if el.sharps >= 0:
                                     key_sig_el.set('sig', f'{el.sharps}s')
                                 else:
@@ -2320,7 +2571,8 @@ class Score:
                         measure.getparent().remove(measure)
             events = self._parts(compact=True, number=True)
             for ii, (tag, df) in enumerate(dfs.items()):
-                _df = self.contextualize(df, offsets=True, measures=True, beats=True)
+                _df = self.contextualize(
+                    df, offsets=True, measures=True, beats=True)
                 _df.columns = events.columns[:len(_df.columns)]
                 if any((start, stop)):   # trim _df to start and stop
                     if start and stop:
@@ -2342,12 +2594,13 @@ class Score:
                             continue
                         val = dfstack.at[ndx]
                         properties = {'xml:id': next(idGen), 'type': tag, 'tstamp': f'{ndx[2]}',
-                            'staff': f'{ndx[3]}', 'layer': f'{ndx[4]}'}
-                        if ndx[4] % 2 == 1:
+                                      'staff': f'{ndx[3]}', 'layer': f'{ndx[4]}'}
+                        if ndx[4] % 2 == 1 and ii % 2 == 0:
                             properties['place'] = 'below'
                         else:
                             properties['place'] = 'above'
-                        analysis_el = ET.SubElement(meas_el, analysis_tag, properties)
+                        analysis_el = ET.SubElement(
+                            meas_el, analysis_tag, properties)
                         analysis_el.text = f'{val}'
             newRoot = ret.getroot()
             indentMEI(newRoot, indentation)
@@ -2363,15 +2616,3 @@ class Score:
             with open(f'./{file_name}', 'w') as f:
                 f.write(meiDeclaration)
                 ret.write(f, encoding='unicode')
-    
-    def toJSON(performanceNmat):                
-        # Convert each DataFrame to a dictionary
-        # Create an empty dictionary to hold the structured data            
-        jsonData = {}
-        for part, df in performanceNmat.items():
-            part_data = {}
-            for xml_id, row in df.iterrows():        
-                part_data[str(xml_id)] = row.to_dict()    
-            jsonData[part] = part_data       
-        
-        return performanceNmat, jsonData
