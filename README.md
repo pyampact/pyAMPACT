@@ -5,4 +5,7 @@ The primary goal of this project is to use score-audio alignment to extract perf
 This code repository translates some of the existing tools from Matlab to Python, primarily using the [pandas](https://pandas.pydata.org) and [music21](https://web.mit.edu/music21/) libraries.
 
 # PIP package
-pyAMPACT is available as a ([pip package](https://pypi.org/project/pyampact/))
+pyAMPACT is available as a [pip package](https://pypi.org/project/pyampact/)
+
+# Documentation
+Documentation is available [here](https://pyampact.github.io/).
