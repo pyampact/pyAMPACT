@@ -326,45 +326,59 @@ def simmx(A, B):
 
 def maptimes(t, intime, outtime):
     """
-    Map the times in t according to the mapping that each point in intime
-    corresponds to that value in outtime.
+    Map onset/offset times using linear interpolation from `intime` to `outtime`.
 
     Parameters
     ----------
-    t : array-like
-        The input times to be mapped. This can be a list or a numpy array of time values.
-
-    intime : array-like
-        The reference input time points. Each point corresponds to a value in `outtime`.
-
-    outtime : array-like
-        The corresponding output time points that map to the values in `intime`.
+    t : np.ndarray of shape (N, 2)
+        Each row contains [onset, offset].
 
     Returns
     -------
-    np.ndarray
-        An array of the mapped times, where each time in `t` is replaced by its corresponding
-        value in `outtime` based on the mapping provided by `intime`. If a time in `t` does
-        not have a corresponding `intime`, it will be returned unchanged.
+    np.ndarray of shape (N, 2)
+        Mapped onset and offset times.
     """
+    t = np.asarray(t)
+    intime = np.asarray(intime)
+    outtime = np.asarray(outtime)
 
-    t = np.array(t)
-    intime = np.array(intime)
-    outtime = np.array(outtime)
-
-    # Ensure that intime and outtime are sorted
     sort_idx = np.argsort(intime)
     intime = intime[sort_idx]
     outtime = outtime[sort_idx]
 
-    u = np.interp(t, intime, outtime, left=outtime[0], right=outtime[-1])
-    u = np.round(u, decimals=3)
+    onset_mapped = np.interp(t[:, 0], intime, outtime, left=outtime[0], right=outtime[-1])
+    offset_mapped = np.interp(t[:, 1], intime, outtime, left=outtime[0], right=outtime[-1])
 
-    return u
+    return np.round(np.stack([onset_mapped, offset_mapped], axis=1), 3)
+
+
+    # """
+    # Linearly interpolate output times for arbitrary t values using
+    # the mapping defined by (intime, outtime).
+    # """
+    # return np.interp(t, intime, outtime)
+
+    # More to MATLAB function
+    # t = np.asarray(t)
+    # intime = np.asarray(intime)
+    # outtime = np.asarray(outtime)
+
+    # original_shape = t.shape
+    # t = t.flatten()
+
+    # u = np.empty_like(t, dtype=outtime.dtype)
+
+    # for i, ti in enumerate(t):
+    #     idx = np.searchsorted(intime, ti, side='right')
+    #     if idx >= len(outtime):
+    #         idx = len(outtime) - 1
+    #     u[i] = outtime[idx]
+
+    # return u.reshape(original_shape)
 
 
 # These are the new functions to replace calculate_f0_est
-def f0_est_weighted_sum(x, f, f0i, fMax=5000, fThresh=None):
+def f0_est_weighted_sum(x, f, f0i, fMax=20000, fThresh=None):
     """
     Calculate F0, power, and spectrum for an inputted spectral representation.
 
@@ -410,8 +424,29 @@ def f0_est_weighted_sum(x, f, f0i, fMax=5000, fThresh=None):
     np.isnan(x2)
     wNum = np.zeros_like(x2)
     wDen = np.zeros_like(x2)
+    # print('-----')
+    # print('fMax', fMax)
+    # print('f0i', f0i)
+
+    # PRINT TIMESTAMP OF CHUNK, what could be happening is audio is shorter (or longer)
+    # than notated seconds in column 1 of CSV
+
+    # This doesn't really work...
+    # f0i = np.nan_to_num(f0i, nan=0.0)
+    # valid_f0i = f0i[f0i > 0]  # Only use positive values
+    # if valid_f0i.size == 0:
+    #     maxI = 1  # Safe default value
+    # else:
+    #     maxI = np.max(fMax / valid_f0i)
+
+    # Use conditionals to check for full array of nan's
+    # Remove nan's entirely
+    # If f0i.size == 0, then maxI = 1
+
     maxI = np.max(fMax / f0i[f0i > 0])
     strips = []
+
+    # print('f0i updated', f0i)
 
     for i in range(1, int(maxI) + 1):
         mask = np.abs(f - (f0i * i)) < fThresh
@@ -430,7 +465,7 @@ def f0_est_weighted_sum(x, f, f0i, fMax=5000, fThresh=None):
     return f0, pow, strips
 
 
-def f0_est_weighted_sum_spec(filename, noteStart_s, noteEnd_s, midiNote, y, sr, useIf=True):
+def f0_est_weighted_sum_spec(noteStart_s, noteEnd_s, midiNote, y, sr, useIf=True):
     """
     Calculate F0, power, and spectrum for a single note.
 
@@ -473,13 +508,20 @@ def f0_est_weighted_sum_spec(filename, noteStart_s, noteEnd_s, midiNote, y, sr, 
     win = round(win_s * sr)
     hop = round(win / 8)
 
+
     # load if gram
+    # This should be moved outside of f0_est and passed in
+    # Also remove audio_file, redundant
     freqs, times, D = librosa.reassigned_spectrogram(
         y=y, sr=sr, hop_length=hop)
 
    # indices for indexing into ifgram (D)
     noteStart_hop = int(np.floor(noteStart_s * sr / hop))
     noteEnd_hop = int(np.floor(noteEnd_s * sr / hop))
+
+    # # Cap noteEnd_hop to the maximum allowed index
+    # noteEnd_hop = min(noteEnd_hop, D.shape[1])
+    
     inds = range(noteStart_hop, noteEnd_hop)
 
     x = np.abs(D[:, inds])**(1/6)
@@ -574,16 +616,16 @@ def durations_from_midi_ticks(filename):
 
 def load_audiofile(audio_file):
     """
-    Loads audio file
+    Loads file for analysis. Currently only the WAV file format is allowed.  AIFF, MP3, etc. must be converted prior.
 
     Parameters
     ----------
     audio_file : str
-        The path to the audio file to be loaded.
+        The path to the wav file to be loaded.
 
     Returns
     -------
-    audio_data : The loaded audio data as a numpy array.
+    audio_data : The loaded wav file as a numpy array.
     sr : The original sample rate of the audio file.
 
     """
@@ -605,5 +647,8 @@ def load_audiofile(audio_file):
 
         # Flatten to a single channel if needed
         audio_data = audio_data.flatten()
+
+        # Convert to float32 in range [-1.0, 1.0]
+        audio_data = audio_data.astype(np.float32) / 32768.0
 
         return audio_data, sr

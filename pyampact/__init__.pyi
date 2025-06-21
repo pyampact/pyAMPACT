@@ -35,6 +35,10 @@ from .performance import (
     perceived_pitch as perceived_pitch
 )
 
+from .speechDescriptors import (
+    get_descriptors as get_descriptors
+)
+
 from .symbolic import (
     Score as Score
 )

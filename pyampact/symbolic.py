@@ -12,7 +12,7 @@ symbolic
 
 from pyampact.symbolicUtils import *
 from fractions import Fraction
-import tempfile
+import sys
 import mido
 import xml.etree.ElementTree as ET
 import requests
@@ -93,13 +93,13 @@ class Score:
     """
     A class to import a score via music21 and expose pyAMPACT's analysis utilities.
 
-    The analysis utilities are generally formatted as pandas dataframes. This 
-    class also ports over some matlab code to help with alignment of scores in 
-    symbolic notation and audio analysis of recordings of those scores. `Score` 
-    objects can insert analysis into an MEI file, and can export any type of 
-    file to a kern format, optionally also including analysis from a JSON file. 
-    Similarly, `Score` objects can serve clickable URLs of short excerpts of 
-    their associated score in symbolic notation. These links open in the Verovio 
+    The analysis utilities are generally formatted as pandas dataframes. This
+    class also ports over some matlab code to help with alignment of scores in
+    symbolic notation and audio analysis of recordings of those scores. `Score`
+    objects can insert analysis into an MEI file, and can export any type of
+    file to a kern format, optionally also including analysis from a JSON file.
+    Similarly, `Score` objects can serve clickable URLs of short excerpts of
+    their associated score in symbolic notation. These links open in the Verovio
     Humdrum Viewer.
 
     :param score_path: A string representing the path to the score file.
@@ -137,6 +137,18 @@ class Score:
             finally:
                 os.remove(tmp_path)
         # file is not an online kern file (can be either or neither but not both)
+        # elif self.fileExtension == 'mid':
+        #     # Convert MIDI to MusicXML
+        #     with tempfile.NamedTemporaryFile(suffix=".musicxml.xml", delete=False) as tmp:
+        #         try:                    
+        #             score = m21.converter.parse(self.path)
+        #             score.write('musicxml', fp=tmp.name)
+        #             self.path = tmp.name
+        #             self.fileExtension = 'xml'
+        #         except Exception as e:
+        #             raise RuntimeError(f"Failed to convert MIDI to MusicXML: {e}")
+        #     self._assignM21Attributes()
+        #     self._import_other_spines()            
         else:
             self._assignM21Attributes()
             self._import_other_spines()
@@ -299,18 +311,17 @@ class Score:
 
         :return: A list of pandas Series, each representing a part in the score.
         """
-        if '_partList' not in self._analyses:
+        if '_partList' not in self._analyses:            
             kernStrands = []
             parts = []
             isUnique = True
             divisiStarts = []
             divisiEnds = []
-            for ii, flat_part in enumerate(self._flatParts):
+            for ii, flat_part in enumerate(self._flatParts):                
                 graces, graceOffsets = [], []
                 notGraces = {}
-                for nrc in flat_part.getElementsByClass(['Note', 'Rest', 'Chord']):
-                    if nrc.duration.isGrace:
-                        graces.append(nrc)
+                for nrc in flat_part.getElementsByClass(['Note', 'Rest', 'Chord']):                    
+                    if nrc.duration.isGrace:                                                                   
                         graceOffsets.append(round(float(nrc.offset), 5))
                     else:
                         # get rid of really long rests TODO: make this get rid of rests longer than the prevailing measure
@@ -323,7 +334,7 @@ class Score:
                             notGraces[offset] = [nrc]
 
                 ser = pd.Series(notGraces)
-                if ser.empty:   # no note, rest, or chord objects detected in this part
+                if ser.empty:   # no note, rest, or chord objects detected in this part                                        
                     ser.name = self.partNames[ii]
                     parts.append(ser)
                     continue
@@ -366,7 +377,7 @@ class Score:
                                             ] = df.iloc[jj, [otherCol, thisCol]]
                                     break
 
-                if len(graces):  # add all the grace notes found to col0
+                if len(graces):  # add all the grace notes found to col0                    
                     part0 = pd.concat((pd.Series(
                         graces, graceOffsets), df.iloc[:, 0].dropna())).sort_index(kind='mergesort')
                     isUnique = False
@@ -374,7 +385,7 @@ class Score:
                     part0 = df.iloc[:, 0].dropna()
                 part0.name = self.partNames[ii]
                 parts.append(part0)
-                kernStrands.append(part0)
+                kernStrands.append(part0)                
 
                 strands = []
                 # if df has more than 1 column, iterate over the non-first columns
@@ -442,6 +453,9 @@ class Score:
         :return: A DataFrame of the note, rest, and chord objects in the score.
         """
         key = ('_parts', multi_index, kernStrands, compact, number)
+
+        # if self.fileExtension == 'csv':
+        #     return
         if key not in self._analyses:
             toConcat = []
             if kernStrands:
@@ -478,14 +492,14 @@ class Score:
                 df.index = df.index.droplevel(1)
             if compact and number:
                 df.columns = mi
-            self._analyses[key] = df
+            self._analyses[key] = df        
         return self._analyses[key]
 
     def _import_other_spines(self, path=''):
         """
         Import the harmonic function spines from a given path.
 
-        :param path: A string representing the path to the file containing the 
+        :param path: A string representing the path to the file containing the
             harmonic function spines.
         :return: A pandas DataFrame representing the harmonic function spines.
         """
@@ -653,7 +667,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.xmlIDs()
         """
         if 'xmlIDs' in self._analyses:
@@ -714,10 +729,10 @@ class Score:
 
     def lyrics(self, strip=True):
         """
-        Extract the lyrics from the score. 
+        Extract the lyrics from the score.
 
-        The lyrics are extracted from each part and returned as a pandas DataFrame 
-        where each column represents a part and each row represents a lyric. The 
+        The lyrics are extracted from each part and returned as a pandas DataFrame
+        where each column represents a part and each row represents a lyric. The
         DataFrame is indexed by the offset of the lyrics.
 
         :param strip: Boolean, default True. If True, the method will strip leading
@@ -732,7 +747,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/Busnoys_In_hydraulis.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/Busnoys_In_hydraulis.krn')
             piece.lyrics()
         """
         key = ('lyrics', strip)
@@ -744,10 +760,10 @@ class Score:
 
     def _m21Clefs(self):
         """
-        Extract the clefs from the score. 
+        Extract the clefs from the score.
 
-        The clefs are extracted from each part and returned as a pandas DataFrame 
-        where each column represents a part and each row represents a clef. The 
+        The clefs are extracted from each part and returned as a pandas DataFrame
+        where each column represents a part and each row represents a clef. The
         DataFrame is indexed by the offset of the clefs.
 
         :return: A pandas DataFrame of the clefs in the score in music21's format.
@@ -785,10 +801,10 @@ class Score:
 
     def _clefs(self):
         """
-        Extract the clefs from the score. 
+        Extract the clefs from the score.
 
-        The clefs are extracted from each part and returned as a pandas DataFrame 
-        where each column represents a part and each row represents a clef. The 
+        The clefs are extracted from each part and returned as a pandas DataFrame
+        where each column represents a part and each row represents a clef. The
         DataFrame is indexed by the offset of the clefs.
 
         :return: A pandas DataFrame of the clefs in the score in kern format.
@@ -800,10 +816,10 @@ class Score:
 
     def dynamics(self):
         """
-        Extract the dynamics from the score. 
+        Extract the dynamics from the score.
 
-        The dynamics are extracted from each part and returned as a pandas DataFrame 
-        where each column represents a part and each row represents a dynamic 
+        The dynamics are extracted from each part and returned as a pandas DataFrame
+        where each column represents a part and each row represents a dynamic
         marking. The DataFrame is indexed by the offset of the dynamic markings.
 
         :return: A pandas DataFrame representing the dynamics in the score.
@@ -816,7 +832,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.dynamics()
         """
         if 'dynamics' not in self._analyses:
@@ -830,8 +847,8 @@ class Score:
 
     def _priority(self):
         """
-        For .krn files, get the line numbers of the events in the piece, which 
-        music21 often calls "priority". For other encoding formats return an 
+        For .krn files, get the line numbers of the events in the piece, which
+        music21 often calls "priority". For other encoding formats return an
         empty dataframe.
 
         :return: A DataFrame containing the priority values.
@@ -841,7 +858,7 @@ class Score:
                 priority = pd.DataFrame()
             else:
                 # use compact to avoid losing priorities of chords
-                parts = self._parts(compact=True)
+                parts = self._parts(compact=True)                
                 if parts.empty:
                     priority = pd.DataFrame()
                 else:
@@ -865,7 +882,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.keys()
 
         If you want to align these results so that they match the columnar (time) axis
@@ -881,21 +899,22 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             pianoRoll = piece.pianoRoll()
             keys = piece.keys(snap_to=pianoRoll)
             combined = pd.concat((pianoRoll, keys))
 
-        The `sampled` and `mask` dfs often have more observations than the spine 
-        contents, so you may want to fill in these new empty slots somehow. The kern 
-        format uses '.' as a filler token so you can pass this as the `filler` 
-        parameter to fill all the new empty slots with this as well. If you choose 
-        some other value, say `filler='_'`, then in addition to filling in the empty 
-        slots with underscores, this will also replace the kern '.' observations with 
-        '_'. If you want to fill them in with NaN's as pandas usually does, you can 
-        pass `filler='nan'` as a convenience. If you want to "forward fill" these 
-        results, you can pass `filler='forward'` (default). This will propagate the 
-        last non-period ('.') observation until a new one is found. Finally, you can 
+        The `sampled` and `mask` dfs often have more observations than the spine
+        contents, so you may want to fill in these new empty slots somehow. The kern
+        format uses '.' as a filler token so you can pass this as the `filler`
+        parameter to fill all the new empty slots with this as well. If you choose
+        some other value, say `filler='_'`, then in addition to filling in the empty
+        slots with underscores, this will also replace the kern '.' observations with
+        '_'. If you want to fill them in with NaN's as pandas usually does, you can
+        pass `filler='nan'` as a convenience. If you want to "forward fill" these
+        results, you can pass `filler='forward'` (default). This will propagate the
+        last non-period ('.') observation until a new one is found. Finally, you can
         pass filler='drop' to drop all empty observations (both NaNs and humdrum
         periods).
 
@@ -942,21 +961,22 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             pianoRoll = piece.pianoRoll()
             harm = piece.harm(snap_to=pianoRoll, output='series')
             combined = pd.concat((pianoRoll, harm))
 
-        The `sampled` and `mask` dfs often have more observations than the spine 
-        contents, so you may want to fill in these new empty slots somehow. The kern 
-        format uses '.' as a filler token so you can pass this as the `filler` 
-        parameter to fill all the new empty slots with this as well. If you choose 
-        some other value, say `filler='_'`, then in addition to filling in the empty 
-        slots with underscores, this will also replace the kern '.' observations with 
-        '_'. If you want to fill them in with NaN's as pandas usually does, you can 
-        pass `filler='nan'` as a convenience. If you want to "forward fill" these 
-        results, you can pass `filler='forward'` (default). This will propagate the 
-        last non-period ('.') observation until a new one is found. Finally, you can 
+        The `sampled` and `mask` dfs often have more observations than the spine
+        contents, so you may want to fill in these new empty slots somehow. The kern
+        format uses '.' as a filler token so you can pass this as the `filler`
+        parameter to fill all the new empty slots with this as well. If you choose
+        some other value, say `filler='_'`, then in addition to filling in the empty
+        slots with underscores, this will also replace the kern '.' observations with
+        '_'. If you want to fill them in with NaN's as pandas usually does, you can
+        pass `filler='nan'` as a convenience. If you want to "forward fill" these
+        results, you can pass `filler='forward'` (default). This will propagate the
+        last non-period ('.') observation until a new one is found. Finally, you can
         pass filler='drop' to drop all empty observations (both NaNs and humdrum
         periods).
 
@@ -988,7 +1008,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.functions()
 
         If you want to align these results so that they match the columnar (time) axis
@@ -1004,21 +1025,22 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             pianoRoll = piece.pianoRoll()
             functions = piece.functions(snap_to=pianoRoll)
             combined = pd.concat((pianoRoll, functions))
 
-        The `sampled` and `mask` dfs often have more observations than the spine 
-        contents, so you may want to fill in these new empty slots somehow. The kern 
-        format uses '.' as a filler token so you can pass this as the `filler` 
-        parameter to fill all the new empty slots with this as well. If you choose 
-        some other value, say `filler='_'`, then in addition to filling in the empty 
-        slots with underscores, this will also replace the kern '.' observations with 
-        '_'. If you want to fill them in with NaN's as pandas usually does, you can 
-        pass `filler='nan'` as a convenience. If you want to "forward fill" these 
-        results, you can pass `filler='forward'` (default). This will propagate the 
-        last non-period ('.') observation until a new one is found. Finally, you can 
+        The `sampled` and `mask` dfs often have more observations than the spine
+        contents, so you may want to fill in these new empty slots somehow. The kern
+        format uses '.' as a filler token so you can pass this as the `filler`
+        parameter to fill all the new empty slots with this as well. If you choose
+        some other value, say `filler='_'`, then in addition to filling in the empty
+        slots with underscores, this will also replace the kern '.' observations with
+        '_'. If you want to fill them in with NaN's as pandas usually does, you can
+        pass `filler='nan'` as a convenience. If you want to "forward fill" these
+        results, you can pass `filler='forward'` (default). This will propagate the
+        last non-period ('.') observation until a new one is found. Finally, you can
         pass filler='drop' to drop all empty observations (both NaNs and humdrum
         periods).
 
@@ -1052,7 +1074,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.chords()
 
         If you want to align these results so that they match the columnar (time) axis
@@ -1068,21 +1091,22 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             pianoRoll = piece.pianoRoll()
             chords = piece.chords(snap_to=pianoRoll)
             combined = pd.concat((pianoRoll, chords))
 
-        The `sampled` and `mask` dfs often have more observations than the spine 
-        contents, so you may want to fill in these new empty slots somehow. The kern 
-        format uses '.' as a filler token so you can pass this as the `filler` 
-        parameter to fill all the new empty slots with this as well. If you choose 
-        some other value, say `filler='_'`, then in addition to filling in the empty 
-        slots with underscores, this will also replace the kern '.' observations with 
-        '_'. If you want to fill them in with NaN's as pandas usually does, you can 
-        pass `filler='nan'` as a convenience. If you want to "forward fill" these 
-        results, you can pass `filler='forward'` (default). This will propagate the 
-        last non-period ('.') observation until a new one is found. Finally, you can 
+        The `sampled` and `mask` dfs often have more observations than the spine
+        contents, so you may want to fill in these new empty slots somehow. The kern
+        format uses '.' as a filler token so you can pass this as the `filler`
+        parameter to fill all the new empty slots with this as well. If you choose
+        some other value, say `filler='_'`, then in addition to filling in the empty
+        slots with underscores, this will also replace the kern '.' observations with
+        '_'. If you want to fill them in with NaN's as pandas usually does, you can
+        pass `filler='nan'` as a convenience. If you want to "forward fill" these
+        results, you can pass `filler='forward'` (default). This will propagate the
+        last non-period ('.') observation until a new one is found. Finally, you can
         pass filler='drop' to drop all empty observations (both NaNs and humdrum
         periods).
 
@@ -1117,7 +1141,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.cdata()
 
         If you want to align these results so that they match the columnar (time) axis
@@ -1133,21 +1158,22 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             pianoRoll = piece.pianoRoll()
             cdata = piece.cdata(snap_to=pianoRoll)
             combined = pd.concat((pianoRoll, cdata))
 
-        The `sampled` and `mask` dfs often have more observations than the spine 
-        contents, so you may want to fill in these new empty slots somehow. The kern 
-        format uses '.' as a filler token so you can pass this as the `filler` 
-        parameter to fill all the new empty slots with this as well. If you choose 
-        some other value, say `filler='_'`, then in addition to filling in the empty 
-        slots with underscores, this will also replace the kern '.' observations with 
-        '_'. If you want to fill them in with NaN's as pandas usually does, you can 
-        pass `filler='nan'` as a convenience. If you want to "forward fill" these 
-        results, you can pass `filler='forward'` (default). This will propagate the 
-        last non-period ('.') observation until a new one is found. Finally, you can 
+        The `sampled` and `mask` dfs often have more observations than the spine
+        contents, so you may want to fill in these new empty slots somehow. The kern
+        format uses '.' as a filler token so you can pass this as the `filler`
+        parameter to fill all the new empty slots with this as well. If you choose
+        some other value, say `filler='_'`, then in addition to filling in the empty
+        slots with underscores, this will also replace the kern '.' observations with
+        '_'. If you want to fill them in with NaN's as pandas usually does, you can
+        pass `filler='nan'` as a convenience. If you want to "forward fill" these
+        results, you can pass `filler='forward'` (default). This will propagate the
+        last non-period ('.') observation until a new one is found. Finally, you can
         pass filler='drop' to drop all empty observations (both NaNs and humdrum
         periods).
 
@@ -1201,7 +1227,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/O_Virgo_Miserere.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/O_Virgo_Miserere.krn')
             rdiss = piece.getSpines('cdata-rdiss')
 
         See Also
@@ -1302,7 +1329,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             pianoRoll = piece.pianoRoll()
             romanNumerals = piece.romanNumerals(snap_to=pianoRoll)
 
@@ -1313,7 +1341,8 @@ class Score:
         .. code-block:: python
 
             piece = Score('test_files/K279-1.krn')
-            romanNumerals = piece.romanNumerals(dez_path='test_files/K279-1_harmony_texture.dez')
+            romanNumerals = piece.romanNumerals(
+                dez_path='test_files/K279-1_harmony_texture.dez')
         """
         if dez_path or 'dez' in self._analyses:
             dez = self.dez(dez_path)
@@ -1339,7 +1368,7 @@ class Score:
 
     def _m21ObjectsNoTies(self):
         """
-        Remove tied notes in a given voice. Only the first note in a tied group 
+        Remove tied notes in a given voice. Only the first note in a tied group
         will be kept.
 
         :param voice: A music21 stream Voice object.
@@ -1357,7 +1386,7 @@ class Score:
         :param compact: Boolean, default False. If True, the method will keep
             chords unified rather then expanding them into separate columns.
         :return: A DataFrame where each column corresponds to a part in the score,
-            and each row index is the offset of a measure start. The values are 
+            and each row index is the offset of a measure start. The values are
             the measure numbers.
         """
         if ('_measures', compact) not in self._analyses:
@@ -1379,11 +1408,11 @@ class Score:
         """
         Return a DataFrame of barlines specifying which barline type.
 
-        Double barline, for example, can help detect section divisions, and the 
+        Double barline, for example, can help detect section divisions, and the
         final barline can help process the `highestTime` similar to music21.
 
         :return: A DataFrame where each column corresponds to a part in the score,
-            and each row index is the offset of a barline. The values are the 
+            and each row index is the offset of a barline. The values are the
             barline types.
         """
         if "_barlines" not in self._analyses:
@@ -1398,10 +1427,10 @@ class Score:
         """
         Return a DataFrame of key signatures for each part in the score.
 
-        :param kern: Boolean, default True. If True, the key signatures are 
+        :param kern: Boolean, default True. If True, the key signatures are
             returned in the **kern format.
         :return: A DataFrame where each column corresponds to a part in the score,
-            and each row index is the offset of a key signature. The values are 
+            and each row index is the offset of a key signature. The values are
             the key signatures.
         """
         if ('_keySignatures', kern) not in self._analyses:
@@ -1421,7 +1450,7 @@ class Score:
         Return a DataFrame of time signatures for each part in the score.
 
         :return: A DataFrame where each column corresponds to a part in the score,
-            and each row index is the offset of a time signature. The values are 
+            and each row index is the offset of a time signature. The values are
             the time signatures in ratio string format.
         """
         if ('_timeSignatures', ratio) not in self._analyses:
@@ -1441,13 +1470,13 @@ class Score:
         """
         Return a DataFrame of durations of note and rest objects in the piece.
 
-        If a DataFrame is provided as `df`, the method calculates the difference 
-        between cell offsets per column in the passed DataFrame, skipping 
+        If a DataFrame is provided as `df`, the method calculates the difference
+        between cell offsets per column in the passed DataFrame, skipping
         memoization.
 
-        :param multi_index: Boolean, default False. If True, the returned DataFrame 
+        :param multi_index: Boolean, default False. If True, the returned DataFrame
             will have a MultiIndex.
-        :param df: Optional DataFrame. If provided, the method calculates the 
+        :param df: Optional DataFrame. If provided, the method calculates the
             difference between cell offsets per column in this DataFrame.
         :return: A DataFrame of durations of note and rest objects in the piece.
 
@@ -1461,7 +1490,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.durations()
         """
         if df is None:
@@ -1494,20 +1524,24 @@ class Score:
 
     def midi_ticks_durations(self, i=1, df=None):
         """
-        Replaces the placeholder ONSET_SEC and OFFSET_SEC columns with specific placements calculated by MIDI
-        tick information. The method translates the music21 stream to MIDI and replaces the values accordingly
+        Replaces the placeholder ONSET_SEC and OFFSET_SEC columns with timing information
+        directly extracted from the music21 stream. No MIDI export or roundtrip needed.
+
+        Parameters
+        ----------
+        i : int
+            Part index (1-based)
+        df : pd.DataFrame or None
+            Optional DataFrame with rows matching notes in the selected part.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated DataFrame with ONSET_SEC, OFFSET_SEC, and DURATION columns.
 
         See Also
         --------
-        :meth:`notes`
-            Return a DataFrame of the newly calculated ONSET_SEC and OFFSET_SEC times, and DURATION
-
-        Example
-        -------
-        .. code-block:: python
-
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
-            piece.durations()
+        self.notes : generates the original symbolic note dataframe.
         """
 
         # Convert music21 stream to MIDI
@@ -1524,18 +1558,19 @@ class Score:
         onsOffsList = []
 
         # Default PPQN and tempo values
-        ppqn = 9600
+        ppqn = mid.ticks_per_beat
         current_tempo = 500000
 
         # Check for tempo metadata in the MIDI file
         for track in mid.tracks:
             for msg in track:
-                if msg.type == 'set_tempo':
-                    current_tempo = msg.tempo
+                if msg.type == 'set_tempo':                                        
+                    current_tempo = msg.tempo                    
                     break  # No need to check further messages in the same track
 
         # Convert ticks per beat to seconds per tick
         seconds_per_tick = current_tempo / (1_000_000 * ppqn)
+        bpm = math.ceil(60000000 / current_tempo)        
 
         # Check if index is out of range
         if i >= len(mid.tracks):
@@ -1574,8 +1609,47 @@ class Score:
         df['ONSET_SEC'] = res['ONSET_SEC']
         df['OFFSET_SEC'] = res['OFFSET_SEC']
         df['DURATION'] = (res['ONSET_SEC'] - res['OFFSET_SEC']) * -1
+        df['TEMPO'] = bpm
 
         return df
+    
+        # # Optional uses music21. OPTIMAL once the parts bit is worked out...
+        # if not isinstance(self.score, m21.stream.Score):
+        #     raise ValueError("self.score must be a music21.stream.Score")
+
+        # try:
+        #     part = self.score.parts[i - 1]
+        # except IndexError:
+        #     raise IndexError(f"Score only has {len(self.score.parts)} parts, but index {i} was requested.")
+
+        # # Inject a default tempo if none is found
+        # if not part.recurse().getElementsByClass(m21.tempo.MetronomeMark):
+        #     default_tempo = m21.tempo.MetronomeMark(number=120)  # 120 BPM
+        #     part.insert(0.0, default_tempo)
+
+        # part_flat = part.flatten()
+        # seconds_map = part_flat.secondsMap
+
+        # rows = []
+        # for m in seconds_map:            
+        #     el = m['element']            
+        #     if isinstance(el, m21.note.Note):
+        #         print(el)
+        #         onset_sec = m['offsetSeconds']
+        #         duration_sec = m['durationSeconds']
+        #         offset_sec = onset_sec + duration_sec
+        #         rows.append((onset_sec, offset_sec, duration_sec))
+
+        # if df is not None:
+        #     if len(df) != len(rows):
+        #         raise ValueError(f"Only {len(rows)} notes found, but {len(df)} rows expected.")
+        #     df = df.copy()
+        #     df['ONSET_SEC'] = [r[0] for r in rows]
+        #     df['OFFSET_SEC'] = [r[1] for r in rows]
+        #     df['DURATION'] = [r[2] for r in rows]
+        #     return df
+        # else:
+        #     return pd.DataFrame(rows, columns=['ONSET_SEC', 'OFFSET_SEC', 'DURATION'])
 
     def contextualize(self, df, offsets=True, measures=True, beats=True):
         """
@@ -1636,12 +1710,12 @@ class Score:
         """
         Return a DataFrame of notes and rests as MIDI pitches.
 
-        MIDI does not have a representation for rests, so -1 is used as a 
+        MIDI does not have a representation for rests, so -1 is used as a
         placeholder.
 
-        :param multi_index: Boolean, default False. If True, the returned DataFrame 
+        :param multi_index: Boolean, default False. If True, the returned DataFrame
             will have a MultiIndex.
-        :return: A DataFrame of notes and rests as MIDI pitches. Rests are 
+        :return: A DataFrame of notes and rests as MIDI pitches. Rests are
             represented as -1.
 
         See Also
@@ -1656,7 +1730,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.midiPitches()
         """
         key = ('midiPitches', multi_index)
@@ -1678,9 +1753,9 @@ class Score:
         `combine_unisons` works the same way for consecutive attacks on the same
         pitch in a given voice, however, `combine_unisons` defaults to False.
 
-        :param combine_rests: Boolean, default True. If True, non-first consecutive 
+        :param combine_rests: Boolean, default True. If True, non-first consecutive
             rests will be removed.
-        :param combine_unisons: Boolean, default False. If True, consecutive attacks 
+        :param combine_unisons: Boolean, default False. If True, consecutive attacks
             on the same pitch in a given voice will be combined.
         :return: A DataFrame of notes and rests in American Standard Pitch Notation.
 
@@ -1694,7 +1769,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.notes()
         """
         if 'notes' not in self._analyses:
@@ -1713,7 +1789,7 @@ class Score:
         """
         Return a DataFrame of the notes and rests given in kern notation.
 
-        This is not the same as creating a kern format of a score, but is an 
+        This is not the same as creating a kern format of a score, but is an
         important step in that process.
 
         :return: A DataFrame of notes and rests in kern notation.
@@ -1729,7 +1805,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.kernNotes()
         """
         if 'kernNotes' not in self._analyses:
@@ -1739,22 +1816,22 @@ class Score:
 
     def nmats(self, json_path=None, include_cdata=False):
         """
-        Return a dictionary of DataFrames, one for each voice, with information 
+        Return a dictionary of DataFrames, one for each voice, with information
         about the notes and rests in that voice.
 
         Each DataFrame has the following columns:
 
         MEASURE  ONSET  DURATION  PART  MIDI  ONSET_SEC  OFFSET_SEC
 
-        In the MIDI column, notes are represented 
-        with their MIDI pitch numbers (0 to 127), and rests are represented with -1s. 
-        The ONSET_SEC and OFFSET_SEC columns are taken from the audio analysis from 
-        the `json_path` file if one is given. The XML_IDs of each note or rest serve 
-        as the index for this DataFrame. If `include_cdata` is True and a `json_path` 
+        In the MIDI column, notes are represented
+        with their MIDI pitch numbers (0 to 127), and rests are represented with -1s.
+        The ONSET_SEC and OFFSET_SEC columns are taken from the audio analysis from
+        the `json_path` file if one is given. The XML_IDs of each note or rest serve
+        as the index for this DataFrame. If `include_cdata` is True and a `json_path`
         is provided, the cdata from the json file is included in the DataFrame.
 
         :param json_path: Optional path to a JSON file containing audio analysis data.
-        :param include_cdata: Boolean, default False. If True and a `json_path` is 
+        :param include_cdata: Boolean, default False. If True and a `json_path` is
             provided, the cdata from the json file is included in the DataFrame.
         :return: A dictionary of DataFrames, one for each voice.
 
@@ -1769,12 +1846,13 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/Mozart_K179_seg.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/Mozart_K179_seg.krn')
             piece.nmats()
         """
         if not json_path:   # user must pass a json_path if they want the cdata to be included
             include_cdata = False
-        key = ('nmats', json_path, include_cdata)
+        key = ('nmats', json_path, include_cdata)        
         if key not in self._analyses:
             nmats = {}
             included = {}
@@ -1795,7 +1873,8 @@ class Score:
 
             if isinstance(ids.index, pd.MultiIndex):
                 ms.index = pd.MultiIndex.from_product((ms.index, (0,)))
-            for i, partName in enumerate(self._parts().columns):
+            
+            for i, partName in enumerate(self._parts().columns):                
                 meas = ms.iloc[:, i]
                 midi = mp.iloc[:, i].dropna()
                 onsetBeat = pd.Series(midi.index.get_level_values(
@@ -1818,11 +1897,13 @@ class Score:
                 df['MEASURE'] = df['MEASURE'].ffill()
                 df.dropna(how='all', inplace=True, subset=df.columns[1:5])
                 df = df.set_index('XML_ID')
+                
 
-                # Remove rows where MIDI == -1.0
-                df = df[df['MIDI'] != -1.0]
+                if self.fileExtension != 'csv':
+                    # Remove rows where MIDI == -1.0                                 
+                    df = df[df['MIDI'] != -1.0]
+                    df = self.midi_ticks_durations(i+1, df)
 
-                df = self.midi_ticks_durations(i+1, df)
                 if json_path is not None:   # add json data if a json_path is provided
                     if len(data.index) > len(df.index):
                         data = data.iloc[:len(df.index), :]
@@ -1868,8 +1949,8 @@ class Score:
 
         Note: There are 128 possible MIDI pitches.
 
-        :return: A DataFrame representing the MIDI piano roll. Each row corresponds 
-            to a MIDI pitch (0 to 127), and each column corresponds to an offset in 
+        :return: A DataFrame representing the MIDI piano roll. Each row corresponds
+            to a MIDI pitch (0 to 127), and each column corresponds to an offset in
             the score. The values are 1 for a note onset and 0 otherwise.
 
         See Also
@@ -1881,11 +1962,22 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.pianoRoll()
         """
+
         if 'pianoRoll' not in self._analyses:
-            mp = self.midiPitches()
+            if self.fileExtension == 'csv':
+                mp = self._analyses['nmats', None, False][
+                    'Part-1']['MIDI']
+                df = mp.reset_index().rename(
+                    columns={'ONSET_SEC': 'Index', 'MIDI': 'Part-1'})
+                df.set_index('Index', inplace=True)
+                mp = df
+            else:
+                mp = self.midiPitches()
+
             # remove non-last offset repeats and forward-fill
             mp = mp[~mp.index.duplicated(keep='last')].ffill()
             pianoRoll = pd.DataFrame(index=range(128), columns=mp.index.values)
@@ -1899,7 +1991,7 @@ class Score:
 
     def sampled(self, bpm=60, obs=24):
         """
-        Sample the score according to the given beats per minute (bpm) and the 
+        Sample the score according to the given beats per minute (bpm) and the
         desired observations per second (obs). This method is primarily used as an
         intermediate step in the construction of a mask. It builds on the pianoRoll
         by sampling the time axis (columns) at the desired rate. The result is a
@@ -1910,8 +2002,8 @@ class Score:
 
         :param bpm: Integer, default 60. The beats per minute to use for sampling.
         :param obs: Integer, default 24. The desired observations per second.
-        :return: A DataFrame representing the sampled score. Each row corresponds 
-            to a MIDI pitch (0 to 127), and each column corresponds to a timepoint 
+        :return: A DataFrame representing the sampled score. Each row corresponds
+            to a MIDI pitch (0 to 127), and each column corresponds to a timepoint
             in the sampled score. The values are 1 for a note onset and 0 otherwise.
 
         See Also
@@ -1923,14 +2015,24 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.sampled()
         """
         key = ('sampled', bpm, obs)
+
         if key not in self._analyses:
-            slices = 60/bpm * obs
-            timepoints = pd.Index(
-                [t/slices for t in range(0, int(self.score.highestTime * slices))])
+            if self.fileExtension == 'csv':
+                highestTime = (self._analyses['nmats', None, False][
+                    'Part-1']['OFFSET_SEC'].max())
+                slices = 60/bpm * obs
+                timepoints = pd.Index(
+                    [t/slices for t in range(0, int(highestTime * slices))])
+
+            else:
+                slices = 60/bpm * obs
+                timepoints = pd.Index(
+                    [t/slices for t in range(0, int(self.score.highestTime * slices))])
             pr = self.pianoRoll().copy()
             pr.columns = [col if col in timepoints else timepoints.asof(
                 col) for col in pr.columns]
@@ -1941,7 +2043,7 @@ class Score:
             self._analyses[key] = sampled
         return self._analyses[key]
 
-    def mask(self, winms=100, sample_rate=2000, num_harmonics=1, width=0,
+    def mask(self, winms=100, sample_rate=4000, num_harmonics=1, width=0,
              bpm=60, aFreq=440, base_note=0, tuning_factor=1, obs=24):
         """
         Construct a mask from the sampled piano roll using width and harmonics. This
@@ -1968,8 +2070,8 @@ class Score:
         :param base_note: Integer, default 0. The base MIDI note to use.
         :param tuning_factor: Float, default 1. The tuning factor to use.
         :param obs: Integer, default 24. The desired observations per second.
-        :return: A DataFrame representing the mask. Each row corresponds to a 
-            frequency bin, and each column corresponds to a timepoint in the 
+        :return: A DataFrame representing the mask. Each row corresponds to a
+            frequency bin, and each column corresponds to a timepoint in the
             sampled score. The values are 1 for a note onset and 0 otherwise.
 
         See Also
@@ -1981,11 +2083,56 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.mask()
         """
         key = ('mask', winms, sample_rate, num_harmonics,
                width, bpm, aFreq, base_note, tuning_factor)
+
+        data = self._analyses
+    
+
+        # Function to replace the index with ONSET_SEC and reset the multi-index
+        def replace_index_with_onset_sec(df):
+            if isinstance(df, pd.DataFrame):  # If it's a DataFrame
+                if 'ONSET_SEC' in df.columns:
+                    # Set 'ONSET_SEC' as index and reset it without keeping the old index
+                    df.set_index('ONSET_SEC', inplace=True)
+                    return df  # No need to reset index, 'ONSET_SEC' is now the index
+            elif isinstance(df, pd.Series):  # If it's a Series
+                return df.reset_index(drop=False)  # Reset index for series
+            return df
+
+        # Apply the transformation
+        processed_data = {}
+        if self.fileExtension == 'csv':
+
+            # Process each entry in the dictionary
+            processed_data['tony_csv'] = replace_index_with_onset_sec(
+                data['tony_csv'])
+            processed_data[('_parts', False, False, False, False)] = replace_index_with_onset_sec(
+                data['_parts', False, False, False, False])
+            processed_data[('durations', True)] = replace_index_with_onset_sec(
+                data[('durations', True)])
+            processed_data[('midiPitches', True)] = replace_index_with_onset_sec(
+                data[('midiPitches', True)])
+            processed_data[('_measures', False)] = replace_index_with_onset_sec(
+                data[('_measures', False)])
+            processed_data['xmlIDs'] = replace_index_with_onset_sec(
+                data['xmlIDs'])
+
+            # Process the nmats dictionary similarly
+            processed_data[('nmats', None, False)] = {
+                key: replace_index_with_onset_sec(df) for key, df in data[('nmats', None, False)].items()
+            }
+
+            # # Print the processed data to check the results
+            # for key, value in processed_data.items():
+            #     print(f"{key}:\n{value}\n")
+
+            self._analyses = processed_data
+
         if key not in self._analyses:
             width_semitone_factor = 2 ** ((width / 2) / 12)
             sampled = self.sampled(bpm, obs)
@@ -1994,7 +2141,7 @@ class Score:
             mask = pd.DataFrame(index=range(
                 num_rows), columns=sampled.columns).infer_objects(copy=False).fillna(0)
             fftlen = 2**round(math.log(winms / 1000 *
-                              sample_rate) / math.log(2))
+                                       sample_rate) / math.log(2))
 
             for row in range(base_note, sampled.shape[0]):
                 note = base_note + row
@@ -2014,15 +2161,16 @@ class Score:
                     mask.iloc[np.where(mcol)[0], np.where(
                         sampled.iloc[row])[0]] = 1
             self._analyses[key] = mask
+
         return self._analyses[key]
 
     def jsonCDATA(self, json_path):
         """
-        Return a dictionary of pandas DataFrames, one for each voice. These 
-        DataFrames contain the cdata from the JSON file designated in `json_path` 
-        with each nested key in the JSON object becoming a column name in the 
-        DataFrame. The outermost keys of the JSON cdata will become the "absolute" 
-        column. While the columns are different, there are as many rows in these 
+        Return a dictionary of pandas DataFrames, one for each voice. These
+        DataFrames contain the cdata from the JSON file designated in `json_path`
+        with each nested key in the JSON object becoming a column name in the
+        DataFrame. The outermost keys of the JSON cdata will become the "absolute"
+        column. While the columns are different, there are as many rows in these
         DataFrames as there are in those of the nmats DataFrames for each voice.
 
         :param json_path: Path to a JSON file containing cdata.
@@ -2056,14 +2204,14 @@ class Score:
 
     def insertAudioAnalysis(self, output_path, data, mimetype='', target='', mei_tree=None):
         """
-        Insert a <performance> element into the MEI score given the analysis data 
+        Insert a <performance> element into the MEI score given the analysis data
         (`data`) in the format of a json file or an nmat dictionary with audio data
         already included. If the original score is not an MEI file, a new MEI file
         will be created and used. The JSON data will be extracted via the `.nmats()`
         method. If provided, the `mimetype` and `target` get passed as
         attributes to the <avFile> element. The performance element will nest
         the DataFrame data in the <performance> element as a child of  <music>
-        and a sibling of <body>. A new file will be saved to the 
+        and a sibling of <body>. A new file will be saved to the
         `output_filename` in the current working directory.
 
         .. parsed-literal::
@@ -2090,9 +2238,9 @@ class Score:
 
         :param output_filename: The name of the output file.
         :param data: Path to a JSON file containing analysis data or an nmats dictionary.
-        :param mimetype: Optional MIME type to be set as an attribute to the <avFile> 
+        :param mimetype: Optional MIME type to be set as an attribute to the <avFile>
             element.
-        :param target: Optional target to be set as an attribute to the <avFile> 
+        :param target: Optional target to be set as an attribute to the <avFile>
             element.
         :param mei_tree: Optional ElementTree object to use as the base for the new file.
             If this is not passed, then the original MEI file is used if the Score
@@ -2117,7 +2265,7 @@ class Score:
         """
         performance = ET.Element('performance', {'xml:id': next(idGen)})
         recording = ET.SubElement(performance, 'recording', {
-                                  'xml:id': next(idGen)})
+            'xml:id': next(idGen)})
         avFile = ET.SubElement(recording, 'avFile', {'xml:id': next(idGen)})
         if mimetype:
             avFile.set('mimetype', mimetype)
@@ -2128,7 +2276,7 @@ class Score:
             for part_name, part_df in jsonCDATA.items():
                 for i, ndx in enumerate(part_df.index):
                     when = ET.SubElement(recording, 'when', {
-                                         'absolute': part_df.at[ndx, 'ONSET_SEC'], 'xml:id': next(idGen), 'data': f'#{ndx}'})
+                        'absolute': part_df.at[ndx, 'ONSET_SEC'], 'xml:id': next(idGen), 'data': f'#{ndx}'})
                     extData = ET.SubElement(
                         when, 'extData', {'xml:id': next(idGen)})
                     extData.text = f' <![CDATA[ {json.dumps(part_df.iloc[i, 1:].to_dict())} ]]> '
@@ -2173,7 +2321,7 @@ class Score:
         Print a VerovioHumdrumViewer link to the score in between the `start` and
         `stop` measures (inclusive).
 
-        :param start: Optional integer representing the starting measure. If `start` 
+        :param start: Optional integer representing the starting measure. If `start`
             is greater than `stop`, they will be swapped.
         :param stop: Optional integer representing the last measure.
         :return: None but a url is printed out
@@ -2186,7 +2334,8 @@ class Score:
         -------
         .. code-block:: python
 
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/M025_00_01a_a.krn')
             piece.show(5, 10)
         """
         if isinstance(start, int) and isinstance(stop, int) and start > stop:
@@ -2222,20 +2371,20 @@ class Score:
     def toKern(self, path_name='', data='', lyrics=True, dynamics=True):
         """
         Create a kern representation of the score. If no `path_name` variable is
-        passed, then returns a pandas DataFrame of the kern representation. 
-        Otherwise a file is created or overwritten at the `path_name` path. If 
-        path_name does not end in '.krn' then this file extension will be added 
-        to the path. If `lyrics` is `True` (default) then the lyrics for each part 
-        will be added to the output, if there are lyrics. The same applies to 
+        passed, then returns a pandas DataFrame of the kern representation.
+        Otherwise a file is created or overwritten at the `path_name` path. If
+        path_name does not end in '.krn' then this file extension will be added
+        to the path. If `lyrics` is `True` (default) then the lyrics for each part
+        will be added to the output, if there are lyrics. The same applies to
         `dynamics`.
 
-        :param path_name: Optional string representing the path to save the kern 
+        :param path_name: Optional string representing the path to save the kern
             file.
-        :param data: Optional string representing the data to be converted to kern 
+        :param data: Optional string representing the data to be converted to kern
             format.
-        :param lyrics: Boolean, default True. If True, lyrics for each part will 
+        :param lyrics: Boolean, default True. If True, lyrics for each part will
             be added.
-        :param dynamics: Boolean, default True. If True, dynamics for each part 
+        :param dynamics: Boolean, default True. If True, dynamics for each part
             will be added.
         :return: String of new kern score if no `path_name` is given, or None if
             writing the new kern file to the location of `path_name`
@@ -2249,7 +2398,8 @@ class Score:
         .. code-block:: python
 
             # create a kern file from a different symbolic notation file
-            piece = Score('https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/K179.xml')
+            piece = Score(
+                'https://github.com/pyampact/pyAMPACTtutorials/blob/main/test_files/K179.xml')
             piece.toKern()
         """
         key = ('toKern', data)
@@ -2535,7 +2685,7 @@ class Score:
                                     idGen), 'shape': el.sign, 'line': f'{el.line}'})
                             elif isinstance(el, m21.meter.TimeSignature):
                                 attrs_el = ET.SubElement(parent, 'attributes', {
-                                                         'xml:id': next(idGen)})
+                                    'xml:id': next(idGen)})
                                 tsig_el = ET.SubElement(
                                     attrs_el, 'time', {'xml:id': next(idGen)})
                                 numerator_el = ET.SubElement(tsig_el, 'beats')
@@ -2547,7 +2697,7 @@ class Score:
                                 score_def_el = ET.Element(
                                     'scoreDef', {'xml:id': next(idGen)})
                                 key_sig_el = ET.SubElement(score_def_el, 'keySig', {
-                                                           'xml:id': next(idGen)})
+                                    'xml:id': next(idGen)})
                                 if el.sharps >= 0:
                                     key_sig_el.set('sig', f'{el.sharps}s')
                                 else:
@@ -2577,7 +2727,6 @@ class Score:
                 if any((start, stop)):   # trim _df to start and stop
                     if start and stop:
                         _df = _df.loc[idx[:, start:stop, :]]
-                        print('here')
                     elif start:
                         _df = _df.loc[idx[:, start:, :]]
                     else:

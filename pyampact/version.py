@@ -6,7 +6,7 @@ import sys
 import importlib
 
 short_version = "0.0"
-version = "0.0.2"
+version = "0.0.4"
 
 
 def __get_mod_version(modname):
@@ -35,6 +35,7 @@ def show_versions() -> None:
         'pytest==7.4.3',
         'scipy==1.11.1',
         'librosa==0.10.0.post2',
+        "mido == 1.3.2",
         'setuptools>=48',
     ]
 

@@ -169,9 +169,11 @@ _duration2Kern = {  # keys get rounded to 5 decimal places
     '16th':    '16',
     'eighth':  '8',
     'quarter': '8'      # make quarter grace notes default to eighth notes too
+
 }
 
 duration2MEI = {
+    'complex': 'complex',  # added this 3/5
     'maxima':  'maxima',
     'longa':   'longa',
     'breve':   'breve',
