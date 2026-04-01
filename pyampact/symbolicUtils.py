@@ -1,74 +1,66 @@
 """
 symbolicUtils
-==============
-
+=======================
 
 .. autosummary::
-    :toctree: generated/
+   :toctree: generated/
 
-    _escape_cdata
-    addMEINote
-    addTieBreakers
-    kernClefHelper
-    combineRests
-    combineUnisons
-    fromJSON
-    _id_gen
-    indentMEI
-    _kernChordHelper
-    kernFooter
-    kernHeader
-    _kernNoteHelper
-    kernNRCHelper
-    noteRestHelper
-    remove_namespaces
-    removeTied
-    snapTo
-    truncate_and_scale_onsOffsList
-    githubURLtoRaw
-
+   _escape_cdata
+   addMEINote
+   addTieBreakers
+   kernClefHelper
+   combineRests
+   combineUnisons
+   fromJSON
+   _id_gen
+   indentMEI
+   _kernChordHelper
+   kernFooter
+   kernHeader
+   _kernNoteHelper
+   kernNRCHelper
+   noteRestHelper
+   remove_namespaces
+   removeTied
+   snapTo
+   truncate_and_scale_onsOffsList
+   githubURLtoRaw
 """
 
-import json
+import json, re, requests
 import numpy as np
 import pandas as pd
-import re
-import requests
+import re as _re
 import xml.etree.ElementTree as ET
 from fractions import Fraction
 
 __all__ = [
-    "_escape_cdata",
-    "addMEINote",
-    "addTieBreakers",
-    "kernClefHelper",
-    "combineRests",
-    "combineUnisons",
-    "fromJSON",
-    "_id_gen",
-    "indentMEI",
-    "_kernChordHelper",
-    "kernFooter",
-    "kernHeader",
-    "_kernNoteHelper",
-    "kernNRCHelper",
-    "noteRestHelper",
-    "remove_namespaces",
-    "removeTied",
-    "snapTo",
-    "truncate_and_scale_onsOffsList",
-    "_duration2Kern",
-    "duration2MEI",
-    "function_pattern",
-    "imported_scores",
-    "tinyNotation_pattern",
-    "volpiano_pattern",
-    "meiDeclaration",
-    "idGen",
-    "githubURLtoRaw"
-
+    '_escape_cdata',
+    'addMEINote',
+    'addTieBreakers',
+    'kernClefHelper',
+    'combineRests',
+    'combineUnisons',
+    'fromJSON',
+    '_id_gen',
+    'idGen',
+    'indentMEI',
+    '_kernChordHelper',
+    'kernFooter',
+    'kernHeader',
+    '_kernNoteHelper',
+    'kernNRCHelper',
+    'noteRestHelper',
+    'remove_namespaces',
+    'removeTied',
+    'snapTo',
+    'truncate_and_scale_onsOffsList',
+    'githubURLtoRaw',
+    'duration2MEI',
+    '_duration2Kern',
+    'meiDeclaration',
+    'explode_kern_chords',
 ]
-
 
 def _escape_cdata(text):
     """
@@ -263,14 +255,6 @@ def addTieBreakers(partList):
     Add tie-breaker level to index. Changes parts in partList in place and 
     returns None. 
 
-    This is particularly useful to disambiguate the order of events that 
-    happen at the same offset, which is an issue most commonly encountered 
-    with grace notes since they have no duration. This is needed in several 
-    `Score` methods because you cannot append multiple pandas series (parts) 
-    if they have non-unique indices. So this method is needed internally to 
-    be able to use pd.concat to turn a list of series into a single dataframe 
-    if any of those series has a repeated value in its index.
-
     :param partList: A list of pandas Series, each representing a part in 
         the score.
     :return: None
@@ -356,13 +340,6 @@ def fromJSON(json_path):
     --------
     :meth:`jsonCDATA`
     :meth:`nmats`
-
-    Example
-    -------
-    .. code-block:: python
-
-        piece = Score('./test_files/CloseToYou.mei.xml')
-        piece.fromJSON(json_path='./test_files/CloseToYou.json')
     """
     if json_path.startswith('https://') or json_path.startswith('http://'):
         json_path = githubURLtoRaw(json_path)
@@ -387,9 +364,7 @@ def _id_gen(start=1):
     """
     Generate a unique ID for each instance of the Score class.
 
-    This function generates a unique ID for each instance of the Score class 
-    by incrementing a counter starting from the provided start value. The ID 
-    is in the format 'pyAMPACT-{start}'. This isn't meant to be used directly
+    The ID is in the format 'pyAMPACT-{start}'. This isn't meant to be used directly
     so see the example below for usage.
 
     :param start: An integer representing the starting value for the ID 
@@ -733,3 +708,115 @@ def truncate_and_scale_onsOffsList(onsOffsList, target_length):
                 ])
 
         return new_onsOffsList
+
+
+def explode_kern_chords(krn_text):
+    """
+    Given Humdrum **kern file text, return (new_text, spine_groups) where:
+      - new_text: every kern spine with chord tokens split into monophonic spines
+      - spine_groups: list of lists mapping each original spine index to its
+        output column indices, e.g. [[0],[1],[2,3,4],[5]] for a file with
+        **function **harm **kern(3-voice) **kern(1-voice).
+    Non-kern spines pass through unchanged.
+    Returns (original_text, 1-to-1 groups) if all kern spines are monophonic.
+    Files with spine-split (*^) or spine-merge (*v) operators are returned
+    unchanged — music21 handles those natively and exploding would corrupt them.
+    """
+    import re as _re
+    lines = krn_text.splitlines()
+
+    # If file uses spine splits/merges, return as-is with 1:1 groups
+    for line in lines:
+        if line.startswith('!') or line.startswith('**') or not line.startswith('*'):
+            continue
+        if any(cell in ('*^', '*v') for cell in line.split('\t')):
+            spine_types = []
+            for ln in lines:
+                if ln.startswith('**'):
+                    spine_types = ln.split('\t')
+                    break
+            sg = [[i] for i in range(len(spine_types))]
+            return krn_text, sg
+    spine_types = []
+    kern_indices = []
+    max_voices = {}
+
+    for line in lines:
+        if line.startswith('!!!'):
+            continue
+        if line.startswith('**'):
+            spine_types = line.split('\t')
+            for i, t in enumerate(spine_types):
+                if t == '**kern':
+                    kern_indices.append(i)
+                    max_voices[i] = 1
+            continue
+        if not spine_types or line.startswith(('*', '=', '!')):
+            continue
+        cols = line.split('\t')
+        for ki in kern_indices:
+            if ki < len(cols):
+                tok = cols[ki].strip()
+                if tok and tok != '.':
+                    n = len(tok.split(' '))
+                    if n > max_voices[ki]:
+                        max_voices[ki] = n
+
+    # Build output column map (needed even for no-op to return spine_groups)
+    out_col_map = {}
+    out_types = []
+    out_idx = 0
+    for i, st in enumerate(spine_types):
+        if st == '**kern':
+            voices = max_voices.get(i, 1)
+            out_col_map[i] = list(range(out_idx, out_idx + voices))
+            out_types.extend(['**kern'] * voices)
+            out_idx += voices
+        else:
+            out_col_map[i] = [out_idx]
+            out_types.append(st)
+            out_idx += 1
+
+    spine_groups = [out_col_map[i] for i in range(len(spine_types))]
+
+    # Fast exit if nothing to explode
+    if not max_voices or all(v == 1 for v in max_voices.values()):
+        return krn_text, spine_groups
+
+    total = out_idx
+    out_lines = []
+    for line in lines:
+        if line.startswith('!!!'):
+            out_lines.append(line); continue
+        if line.startswith('**'):
+            out_lines.append('\t'.join(out_types)); continue
+        if line.startswith('*-'):
+            out_lines.append('\t'.join(['*-'] * total)); continue
+        if line.startswith(('*', '=', '!')):
+            cols = line.split('\t')
+            row = []
+            for i, tok in enumerate(cols):
+                for _ in out_col_map.get(i, [i]):
+                    row.append(tok)
+            out_lines.append('\t'.join(row)); continue
+        cols = line.split('\t')
+        row = ['.'] * total
+        for i, tok in enumerate(cols):
+            if i not in out_col_map:
+                continue
+            positions = out_col_map[i]
+            tok = tok.strip()
+            if i in kern_indices:
+                if tok and tok != '.':
+                    notes = tok.split(' ')
+                    for j, pos in enumerate(positions):
+                        if j < len(notes):
+                            row[pos] = notes[j]
+                        else:
+                            dur = _re.search(r'(\d+\.?)', notes[0])
+                            row[pos] = (dur.group(1) if dur else '4') + 'r'
+            else:
+                row[positions[0]] = tok
+        out_lines.append('\t'.join(row))
+
+    return '\n'.join(out_lines) + '\n', spine_groups

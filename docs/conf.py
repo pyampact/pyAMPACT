@@ -19,7 +19,7 @@ sys.path.insert(0, srcpath)
 project = 'pyAMPACT'
 copyright = '2024, AMPACT Research Team'
 author = 'AMPACT Research Team'
-release = '0.0.4'
+release = '0.0.6'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -32,7 +32,7 @@ extensions = [
 ]
 
 autosummary_generate = True
-autosummary_generate_overwrite = False
+autosummary_generate_overwrite = True
 templates_path = ['_templates']
 exclude_patterns = ['docs', '_build', 'Thumbs.db', '.DS_Store', 'sandbox.py']
 

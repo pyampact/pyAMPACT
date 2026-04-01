@@ -9,50 +9,42 @@ alignment
     run_alignment
     run_DTW_alignment
     align_midi_wav
-    alignment_visualiser
-    ifgram
-    get_ons_offs
 """
 
-from pyampact.alignmentUtils import orio_simmx, simmx, dp, maptimes
+from pyampact.alignmentUtils import *
+from pyampact.symbolic import *
 from scipy import signal
 import numpy as np
 import matplotlib.pyplot as plt
 import librosa
 import librosa.display
 import pandas as pd
+import scipy.signal
 
 import sys
 import os
 sys.path.append(os.pardir)
+
+import warnings
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API")
+
 
 
 __all__ = [
     "run_alignment",
     "run_DTW_alignment",
     "align_midi_wav",
-    "alignment_visualiser",
-    "ifgram",
-    "get_ons_offs"
 ]
 
 
-def run_alignment(y, sym_file, original_sr, piece, nmat, monophonic=True, width=3, target_sr=4000, nharm=3, win_ms=100, hop=32, showSpec=False):
+def run_alignment(audio_file, score_file, width=3, target_sr=4000, nharm=3, win_ms=100, hop=32):
     """
     Parameters
     ----------
-    y : ndarray
-        Audio time series.
-    sym_file : ndarray
-        Path to symbolic file.
-    original_sr : int
-        Original sample rate of the audio file.
-    piece : Score
-        A `Score` instance containing the symbolic MIDI data.
-    nmat : ndarray
-        Dictionary of dataframes of note by note symbolic analysis
-    monophonic : bool
-        For processing monophonic MIDI files
+    audio_file : string
+        Path to audio file
+    score_file : string
+        Path to score/symbolic file
     width : float
         Width parameter for the DTW alignment.
     target_sr : int
@@ -63,28 +55,19 @@ def run_alignment(y, sym_file, original_sr, piece, nmat, monophonic=True, width=
         Window size in milliseconds for the analysis.
     hop : int
         Number of samples between successive frames.
-    showSpec : bool
-        If True, displays the spectrogram of the audio.
 
     Returns
     -------
-    align : dict
-        MIDI-audio alignment structure from DTW containing:
-        - 'on': Onset times of the notes.
-        - 'off': Offset times of the notes.
-        - 'midiNote': MIDI note numbers corresponding to the aligned notes.
-    dtw : dict
-        A dictionary of DTW returns, including:
-        - 'M': The map such that M[:,m] corresponds to the alignment.
-        - 'MA': Path from dynamic programming (DP) for MIDI-audio alignment.
-        - 'RA': Path from DP for real audio alignment.
-        - 'S': Similarity matrix used in the alignment process.
-        - 'D': Spectrogram of the audio.
-        - 'notemask': The MIDI-note-derived mask used in the alignment.
     spec : ndarray
         Spectrogram of the audio file.
+    piece : Music21 Object
+        All labels in Music21 format
     newNmat : DataFrame
         Updated DataFrame containing the note matrix (nmat) data after alignment.
+    y : ndarray
+        Audio data of audio_file
+    original_sr : int
+        Sample rate returned by audio_file
 
     Notes
     -----
@@ -92,37 +75,48 @@ def run_alignment(y, sym_file, original_sr, piece, nmat, monophonic=True, width=
     It computes onset and offset times and updates the alignment using a similarity matrix. 
     Optionally, it can display the audio spectrogram for visual analysis.
     """
-
-    # If midi is monophonic, combines and orders dictionary of nmats
-    if monophonic == True and sym_file.lower().endswith(".mid"):
-        merged_nmat = (
-        pd.concat(nmat.values())
-            .sort_values("ONSET_SEC")    
-        )
-
-        nmat = {'Voice 1': merged_nmat}        
     
+    piece = load_score(score_file)
+
+    pd.set_option('display.max_rows', None)
+
+    nmat = nmats(piece)
+
+    y, original_sr = librosa.load(
+        audio_file,
+        sr=None,
+        mono=True,
+        dtype=np.float32
+    )
     # Normalize audio file
     y = y / np.sqrt(np.mean(y ** 2)) * 0.6
+        
+    nmat = merge_grace_notes(nmat) 
+
+    # Tempo rescaling
+    audio_duration = len(y) / original_sr
+    score_end = max(
+        df['OFFSET_SEC'].max()
+        for df in nmat.values()
+        if not df.empty and 'OFFSET_SEC' in df.columns
+    )
+    if score_end > 0 and audio_duration > 0:
+        scale = audio_duration / score_end
+        for df in nmat.values():
+            df['ONSET_SEC']  = (df['ONSET_SEC']  * scale).round(3)
+            df['OFFSET_SEC'] = (df['OFFSET_SEC'] * scale).round(3)
+            df['DURATION']   = (df['OFFSET_SEC'] - df['ONSET_SEC']).round(6)
+
+    # Run DTW alignment
+    spec, newNmat = run_DTW_alignment(
+        y, original_sr, piece, 0.025, width, target_sr, nharm, win_ms, hop, nmat)
     
-    # Get first tempo
-    first_df = next(iter(nmat.values()))
-    tempo = (first_df.iloc[0]['TEMPO'])
     
-    # Run DTW alignment    
-    spec, dtw, newNmat = run_DTW_alignment(
-        y, original_sr, piece, 0.025, width, target_sr, nharm, win_ms, hop, nmat, showSpec, bpm=tempo)
-    
-    # Remove tempo column
-    for key in newNmat:
-        if 'TEMPO' in nmat[key].columns:
-            nmat[key] = nmat[key].drop(columns='TEMPO')
-    
-    nmat = newNmat    
-    return dtw, spec, nmat
+    trimmedNmat = trim_silences(newNmat, y, original_sr, rms_thresh_db=-40.0)        
+    return spec, piece, trimmedNmat, y, original_sr
 
 
-def run_DTW_alignment(y, original_sr, piece, tres, width, target_sr, nharm, win_ms, hop, nmat, showSpec, bpm):
+def run_DTW_alignment(y, original_sr, piece, tres, width, target_sr, nharm, win_ms, hop, nmat):
     """
     Perform a dynamic time warping (DTW) alignment between an audio file and its corresponding MIDI file.
 
@@ -151,8 +145,6 @@ def run_DTW_alignment(y, original_sr, piece, tres, width, target_sr, nharm, win_
         Number of samples between successive frames for analysis.
     nmat : DataFrame
         DataFrame containing note matrix (nmat) data before alignment.
-    showSpec : bool
-        If True, displays the spectrogram of the audio file.
 
     Returns
     -------
@@ -175,107 +167,56 @@ def run_DTW_alignment(y, original_sr, piece, tres, width, target_sr, nharm, win_
         Updated DataFrame containing the note matrix (nmat) data after alignment.
     """
     
-    p, q, S, D, M = align_midi_wav(
-        piece, WF=y, sr=original_sr, TH=tres, ST=0, width=width, tsr=target_sr, nhar=nharm, hop=hop, wms=win_ms, showSpec=showSpec, bpm=bpm)
-
-    dtw = {
-        'MA': p,
-        'RA': q,
-        'S': S,
-        'D': D,
-        'notemask': M,
-    }
-
+    p, q, S, D, M, times = align_midi_wav(
+        nmat, piece, WF=y, sr=original_sr, TH=tres, width=width, tsr=target_sr, nhar=nharm, hop=hop, wms=win_ms)
     
-
     # Avoid log(0) by replacing with smallest nonzero value
     D[D == 0] = np.min(D[D > 0])
 
-    if showSpec == True:
-        # Plot spectrogram
-        plt.subplot(2, 1, 1)
-        plt.imshow(20 * np.log10(D), aspect='auto',
-                   origin='lower', cmap='gray_r')
-        plt.colorbar()
-        plt.clim(np.max(20 * np.log10(D)) + np.array([-50, 0]))
+    spec = D
+    
+    p = np.asarray(p, dtype=int)
+    q = np.asarray(q, dtype=int)
 
-        # Zoom in to see the detail
-        maxcol = min(1000, min(M.shape[1], D.shape[1]))
-        plt.xlim([0, maxcol])
-        plt.ylim([0, D.shape[0]])
-
-        plt.show()
-
-    spec = dtw['D']
-
-    dtw['MA'] = np.array(dtw['MA'])*tres
-    dtw['RA'] = np.array(dtw['RA'])*tres
+    p_sec = p * tres
+    q_sec = times[q]
 
 
+    """
+    p = (np.array(p)-1)*tres
+    q = (np.array(q)-1)*tres
+
+    """
+        
     # Fix csv nmat formatting
     if (getattr(piece, 'fileExtension')) == 'csv':
-        # Reset the index, moving ONSET_SEC to a column
         nmat['Part-1'] = nmat['Part-1'].reset_index()
 
         # Recreate the index for each row
         nmat['Part-1'].index = [
             f"pyAMPACT-{i+1}" for i in range(len(nmat['Part-1']))]
 
-        # Reorder the columns as needed
-        nmat['Part-1'] = nmat['Part-1'][['MEASURE', 'ONSET',
-                                        'DURATION', 'PART', 'MIDI', 'ONSET_SEC', 'OFFSET_SEC']]
+        # Move key columns to the front, keep the rest
+        front = ['MEASURE', 'ONSET', 'DURATION', 'PART', 'MIDI', 'ONSET_SEC', 'OFFSET_SEC']
+        rest = [c for c in nmat['Part-1'].columns if c not in front]
+        nmat['Part-1'] = nmat['Part-1'][front + rest]
 
     if (getattr(piece, 'fileExtension')) != 'csv':
-        for key, df in nmat.items():
+        for key, df in nmat.items():            
+            onsOffs = np.column_stack([df['ONSET_SEC'].values, df['OFFSET_SEC'].values])            
             onsOffs = np.column_stack([df['ONSET_SEC'].values, df['OFFSET_SEC'].values])
-            
-            maskLength = M.shape[1] * tres
-            factor = maskLength / onsOffs.max()
-            onsOffs = onsOffs * factor
-            onsOffs = np.round(onsOffs, decimals=3)
-            
+            onsOffs = np.round(onsOffs, 3)
+            mapped = maptimes(onsOffs, p_sec, q_sec)
 
-            mapped = maptimes(onsOffs, dtw['MA'], dtw['RA'])                                    
-
-            # Enforce monotonicity: offset can't exceed next onset
-            for i in range(len(mapped) - 1):                
-                if mapped[i, 1] > mapped[i + 1, 0]:
-                    mapped[i, 1] = mapped[i + 1, 0] - 0.001  # 1ms safety margin
-
-            # Ensure no negative durations
-            mapped[:, 1] = np.maximum(mapped[:, 1], mapped[:, 0] + 0.001)
 
             df['ONSET_SEC'] = np.round(mapped[:, 0], 3)
             df['OFFSET_SEC'] = np.round(mapped[:, 1], 3)
             df['DURATION'] = np.round(df['OFFSET_SEC'] - df['ONSET_SEC'], 6)
 
-    # Original
-    # # loop through voices        
-    #     for key, df in nmat.items():
-    #         onset_sec = df['ONSET_SEC'].values
-    #         offset_sec = df['OFFSET_SEC'].values
-
-    #         onsOffs = np.array([[on, off]
-    #                             for on, off in zip(onset_sec, offset_sec)])
-            
-                    
-    #         # maskLength = M.shape[1] * tres
-    #         # factor = maskLength / onsOffs.max()
-    #         # onsOffs = onsOffs * factor
-    #         # onsOffs = np.round(onsOffs, decimals=3)
-
-    #         x = maptimes(onsOffs, dtw['MA'], dtw['RA'])            
-            
-
-    #         df.loc[:, 'ONSET_SEC'] = x[:, 0]
-    #         df.loc[:, 'OFFSET_SEC'] = x[:, 1]
-    #         # df.at[df.index[0], 'ONSET_SEC'] = 0  # Set first value to 0 always
+    return spec, nmat
 
 
-    return spec, dtw, nmat
-
-
-def align_midi_wav(piece, WF, sr, TH, ST, width, tsr, nhar, wms, hop, showSpec, bpm):
+def align_midi_wav(nmat, piece, WF, sr, TH, width, tsr, nhar, wms, hop):
     """
     Align a midi file to a wav file using the "peak structure
     distance" of Orio et al. that use the MIDI notes to build
@@ -283,8 +224,8 @@ def align_midi_wav(piece, WF, sr, TH, ST, width, tsr, nhar, wms, hop, showSpec, 
 
     Parameters
     ----------
-    piece : Score
-        A `Score` instance containing the symbolic MIDI data.
+    piece : Music21 Object
+        Object from load_score with all data and labels
     WF : ndarray
         Audio time series of the WAV file.
     sr : int
@@ -303,8 +244,6 @@ def align_midi_wav(piece, WF, sr, TH, ST, width, tsr, nhar, wms, hop, showSpec, 
         Window size in milliseconds.
     hop : int
         Hop size for the analysis window.
-    showSpec : bool
-        If True, displays the spectrogram.
 
     Returns
     -------
@@ -320,207 +259,42 @@ def align_midi_wav(piece, WF, sr, TH, ST, width, tsr, nhar, wms, hop, showSpec, 
         The MIDI-note-derived mask, including harmonic information if available.
     """
 
-    # Calculate spectrogram
-    fft_len = int(2**np.round(np.log(wms/1000*tsr)/np.log(2)))
-    ovlp = round(fft_len - TH*tsr)
+    # STFT config: hop is defined by TH, not by external hop_length
+    fft_len = int(2 ** np.round(np.log(wms / 1000 * tsr) / np.log(2)))
+    hop_samp = int(round(TH * tsr))
+    ovlp = int(fft_len - hop_samp)
+    ovlp = max(0, min(ovlp, fft_len - 1))
+
+    # resample audio to tsr without changing duration semantics
+    y = signal.resample(WF, int(round(len(WF) * tsr / sr)))
+
+    freqs, times, D = signal.stft(
+        y, fs=tsr, window="hamming",
+        nperseg=fft_len, noverlap=ovlp, nfft=fft_len
+    )
+
+    # magnitude + normalize
+    D = np.abs(D)
+    mx = D.max()
+    if mx > 0:
+        D /= mx
+
+
+    # NOTE THAT I TOOK THESE OUT!!! WHAT HAPPENS?!
+    # force time axis to match TH exactly (used later for p,q scaling)
+    # frame_sec = hop_samp / tsr
+    # times = np.arange(D.shape[1]) * frame_sec
+    # TH = frame_sec  # enforce consistency everywhere downstream
+
+    # build mask in absolute seconds from the existing music21 score
+    M = build_mask_from_nmat_seconds(
+        nmat, sample_rate=tsr, num_harmonics=nhar,
+        width=width, tres=TH, n_freqs=D.shape[0]
+    )
+
+    S = orio_simmx(M, D)
+
+    # Drop your own DTW here...
+    p, q, total_costs = dp(1.0-S)    
     
-    # y = librosa.resample(WF, orig_sr=sr, target_sr=tsr)
-    y = signal.resample(WF, int(len(WF) * tsr / sr))
-
-    freqs, times, D = signal.stft(y, fs=tsr, window='hamming',
-                                  nperseg=fft_len, noverlap=ovlp, nfft=fft_len)
-
-    
-    # Normalize D
-    D_max = np.max(D)
-    if D_max != 0:
-        D = D / D_max
-
-    times = librosa.times_like(D, sr=tsr, hop_length=hop)
-    freqs = librosa.fft_frequencies(sr=tsr, n_fft=fft_len)
-    
-
-    if showSpec == True:
-        alignment_visualiser(D, times, freqs, showSpec=showSpec)
-    
-    
-    M = piece.mask(sample_rate=tsr, bpm=60, num_harmonics=nhar,
-                   width=width, winms=wms, obs=24)
-    
-    D = np.abs(D) 
-
-    # Calculate the peak-structure-distance similarity matrix     
-    
-    if ST == 1:
-        S = orio_simmx(M, D)
-    else:
-        S = simmx(M, D)
-
-    # Ensure no NaNs (only going to happen with simmx)
-    S[np.isnan(S)] = 0
-
-    p, q, D, phi = dp(1-S)
-   
-             
-
-    # def plot_dtw_path_on_S(S, p, q, title="DTW Cost Matrix with Path"):
-    #     plt.figure(figsize=(10, 6))
-    #     plt.imshow(S, origin='lower', aspect='auto', cmap='viridis')
-    #     plt.plot(q, p, 'r-', linewidth=1.2, label='DTW path')
-    #     plt.xlabel("Audio Time Frame Index (q)")
-    #     plt.ylabel("Symbolic Event Index (p)")
-    #     plt.colorbar(label="Cost")
-    #     plt.title(title)
-    #     plt.legend()
-    #     plt.tight_layout()
-    #     plt.show()
-    
-    # plot_dtw_path_on_S(S, p, q)
-
-    
-
-    # Add harms to nmat
-    if getattr(piece, 'fileExtension') != 'csv':
-        harm = piece.harm(snap_to=M, output='series')
-        if not harm.isna().all():
-            M = pd.concat((M, harm))
-
-    return p, q, S, D, M
-
-
-def alignment_visualiser(audio_spec, times=None, freqs=None, fig=1, showSpec=True):
-    """
-    Visualizes the dynamic time warping (DTW) alignment.    
-
-    Parameters
-    ----------
-    audio_spec : ndarray
-        Spectrogram of the audio file to be visualized.
-    times : ndarray, optional
-        Array of segment times corresponding to the audio spectrogram. If not provided, defaults to None.
-    freqs : ndarray, optional
-        Array of sample frequencies corresponding to the audio spectrogram. If not provided, defaults to None.
-    fig : int, optional
-        Figure number for the plot. Default is 1.
-    showSpec : bool, optional
-        If True, displays the spectrogram overlayed with the alignment information. Default is True.
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-        The visualized spectrogram plot with DTW alignment overlays.
-    """
-
-    if (len(times) > 0 and len(freqs) > 0) and showSpec == True:
-        # Convert complex to real and take the magnitude
-        plt.pcolormesh(times, freqs, 10 *
-                       np.log10(np.abs(audio_spec)), shading='auto')
-        plt.ylabel('Frequency (Hz)')
-        plt.xlabel('Time (s)')
-        plt.title('Alignment Spectrogram')
-        plt.colorbar(label='Power/Frequency (dB/Hz)')
-        plt.show()
-    else:
-        # print("To show spectrogram, make sure to provide freqs/times matrices and set showSpec=True")
-        return
-
-
-def ifgram(audiofile, tsr, win_ms, showSpec=True):
-    """
-    Compute the instantaneous frequency (IF) spectrogram of an audio file using
-    the reassigned spectrogram and Short-Time Fourier Transform (STFT).
-
-    Parameters
-    ----------
-    audiofile : str
-        Path to the audio file to be analyzed.
-    tsr : int
-        Target sample rate of the audio signal.
-    win_ms : float
-        Window size in milliseconds for spectral analysis.
-    showSpec : bool, optional
-        If True, displays the spectrogram of the reassigned spectrogram. Default is False.
-
-    Returns
-    -------
-    freqs : ndarray
-        Reassigned frequency bins of the spectrogram.
-    times : ndarray
-        Time frames corresponding to the spectrogram.
-    mags : ndarray
-        Magnitudes of the reassigned spectrogram.
-    f0_values : ndarray
-        Fundamental frequency estimates for each time frame.
-    mags_mat : ndarray
-        Magnitude matrix from the Short-Time Fourier Transform (STFT).
-    """
-
-    # win_samps = int(tsr / win_ms) # low-res
-    win_samps = 2048  # Placeholder for now, default
-    y, sr = librosa.load(audiofile)
-
-    freqs, times, mags = librosa.reassigned_spectrogram(y=y, sr=tsr,
-                                                        n_fft=win_samps, reassign_frequencies=False)
-
-    # Find the index of the maximum magnitude frequency bin for each time frame
-    max_mag_index = np.argmax(mags, axis=0)
-
-    # Extract the corresponding frequencies as f0 values
-    f0_values = freqs[max_mag_index]
-
-    # Calculate the Short-Time Fourier Transform (STFT)
-    D = librosa.stft(y)
-
-    # Extract the magnitude and phase information
-    mags_mat = np.abs(D)
-    mags_db = librosa.amplitude_to_db(mags, ref=np.max)
-
-    if showSpec == True:
-        fig, ax = plt.subplots(nrows=2, sharex=True, sharey=True)
-        img = librosa.display.specshow(
-            mags_db, x_axis="s", y_axis="linear", sr=tsr, hop_length=win_samps//4, ax=ax[0])
-        ax[0].set(title="Spectrogram", xlabel=None)
-        ax[0].label_outer()
-        ax[1].scatter(times, freqs, c=mags_db, cmap="magma", alpha=0.1, s=5)
-        ax[1].set_title("Reassigned spectrogram")
-        fig.colorbar(img, ax=ax, format="%+2.f dB")
-
-        plt.show()
-
-    return freqs, times, mags, f0_values, mags_mat
-
-
-def get_ons_offs(onsoffs):
-    """
-    Extract onset and offset times from a 3*N alignment matrix generated by AMPACT's 
-    HMM-based alignment algorithm.
-
-    Parameters
-    ----------
-    onsoffs : ndarray
-        A 3*N alignment matrix where:
-        - The first row contains N states.
-        - The second row contains the corresponding ending times for each state.
-        - The third row contains the state indices.
-
-    Returns
-    -------
-    res : dict
-        A dictionary containing:
-        - 'ons': List of onset times.
-        - 'offs': List of offset times.
-
-    """
-
-    # Find indices where the first row is equal to 3
-    stopping = np.where(onsoffs[0] == 3)[0]
-
-    # Calculate starting indices by subtracting 1 from stopping indices
-    starting = stopping - 1
-
-    res = {'ons': [], 'offs': []}
-    for i in range(len(starting)):
-        res['ons'].append(onsoffs[1, starting[i]])
-        res['offs'].append(onsoffs[1, stopping[i]])
-
-    return res
+    return p, q, S, D, M, times

@@ -43,6 +43,8 @@ Welcome to pyAMPACT's documentation!
    performance
    symbolic
    symbolicUtils
+   speechDescriptors
+   speechDescriptorsUtils
 
 Indices and tables
 ==================

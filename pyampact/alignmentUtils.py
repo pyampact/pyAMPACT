@@ -5,17 +5,15 @@ alignmentUtils
 .. autosummary::
     :toctree: generated/
 
-    dpcore
     dp
     gh    
     g
-    orio_simmx
-    simmx
+    orio_simmx    
     maptimes    
     f0_est_weighted_sum
     f0_est_weighted_sum_spec
-    durations_from_midi_ticks
-    load_audiofile
+    trim_silences
+    merge_grace_notes
 
 """
 
@@ -23,164 +21,72 @@ import wave
 import numpy as np
 import pandas as pd
 import librosa
-import mido
 import warnings
 
 
 __all__ = [
-    "dpcore",
     "dp",
     "gh",
     "g",
-    "orio_simmx",
-    "simmx",
+    "orio_simmx",    
     "maptimes",
     "f0_est_weighted_sum",
     "f0_est_weighted_sum_spec",
-    "durations_from_midi_ticks",
-    "load_audiofile"
+    "trim_silences",
+    "merge_grace_notes"
 ]
 
 
-def dpcore(M, pen):
-    """Core dynamic programming calculation of best path.
-       M[r,c] is the array of local costs.
-       Create D[r,c] as the array of costs-of-best-paths to r,c,
-       and phi[r,c] as the indicator of the point preceding [r,c] to
-       allow traceback; 0 = (r-1,c-1), 1 = (r,c-1), 2 = (r-1, c)
-
-    Parameters
-    ----------
-    M : np.ndarray
-        A 2D array of local costs, where M[r, c] represents the cost at position (r, c).
-
-    pen : float
-        A penalty value applied for non-diagonal movements in the path.
-
-    Returns
-    -------
-    D : np.ndarray
-        A 2D array of cumulative best costs to each point (r,c), starting from (0,0).
-
-    phi : np.ndarray
-        A 2D array of integers used for traceback, where:
-        - 0 indicates the previous point was (r-1, c-1).
-        - 1 indicates the previous point was (r, c-1).
-        - 2 indicates the previous point was (r-1, c).
+def dp(M):
     """
-
-    # Pure python equivalent
-    D = np.zeros(M.shape, dtype=float)
-    phi = np.zeros(M.shape, dtype=int)
-    # bottom edge can only come from preceding column
-    D[0, 1:] = M[0, 0]+np.cumsum(M[0, 1:]+pen)
-    phi[0, 1:] = 1
-    # left edge can only come from preceding row
-    D[1:, 0] = M[0, 0]+np.cumsum(M[1:, 0]+pen)
-    phi[1:, 0] = 2
-    # initialize bottom left
-    D[0, 0] = M[0, 0]
-    phi[0, 0] = 0
-    # Calculate the rest recursively
-    for c in range(1, np.shape(M)[1]):
-        for r in range(1, np.shape(M)[0]):
-            best_preceding_costs = [
-                D[r-1, c-1], pen+D[r, c-1], pen+D[r-1, c]]
-            tb = np.argmin(best_preceding_costs)
-            D[r, c] = best_preceding_costs[tb] + M[r, c]
-            phi[r, c] = tb
-
-    return D, phi
-
-
-def dp(local_costs, penalty=0.1, gutter=0.0, G=0.5):
+    Port of Dan Ellis dp.m
+    [p,q,D] = dp(M)
     """
-    Use dynamic programming to find a min-cost path through a matrix
-    of local costs.
+    M = np.asarray(M, dtype=float)
+    r, c = M.shape
 
-    Parameters
-    ----------
-    local_costs : np.ndarray
-        A 2D matrix of local costs, where each cell represents the cost associated 
-        with that specific position.
+    D = np.zeros((r + 1, c + 1), dtype=float)
+    D[0, :] = np.nan
+    D[:, 0] = np.nan
+    D[0, 0] = 0.0
+    D[1:r+1, 1:c+1] = M
 
-    penalty : float, optional
-        An additional cost incurred for moving in the horizontal or vertical direction 
-        (i.e., (0,1) and (1,0) steps). Default is 0.1.
+    phi = np.zeros((r, c), dtype=np.int32)
 
-    gutter : float, optional
-        A proportion of edge length that allows for deviations away from the 
-        bottom-left corner (-1,-1) in the optimal path. Default is 0.0, meaning 
-        the path must reach the top-right corner.
+    for i in range(r):
+        for j in range(c):
+            # MATLAB: min([D(i,j), D(i,j+1), D(i+1,j)])
+            choices = np.array([D[i, j], D[i, j+1], D[i+1, j]])
+            tb = int(np.nanargmin(choices)) + 1  # 1..3
+            D[i+1, j+1] = D[i+1, j+1] + choices[tb - 1]
+            phi[i, j] = tb
 
-    G : float, optional
-        A proportion of the edge length considered for identifying gulleys in the 
-        cost matrix. Default is 0.5.
-
-    Returns
-    -------
-    p : np.ndarray
-        An array of row indices corresponding to the best path.
-
-    q : np.ndarray
-        An array of column indices corresponding to the best path.
-
-    total_costs : np.ndarray
-        A 2D array of minimum costs to reach each cell in the local costs matrix.
-
-    phi : np.ndarray
-        A traceback matrix indicating the preceding best-path step for each cell, where:
-        - 0 indicates a diagonal predecessor.
-        - 1 indicates the previous column (same row).
-        - 2 indicates the previous row (same column).
-    """
-    rows, cols = np.shape(local_costs)
-    total_costs = np.zeros((rows + 1, cols + 1), float)
-    total_costs[0, :] = np.inf
-    total_costs[:, 0] = np.inf
-    total_costs[0, 0] = 0
-    total_costs[1:(rows + 1), 1:(cols + 1)] = local_costs
-
-    phi = np.zeros((rows, cols), int)
-
-    for i in range(1, rows + 1):
-        for j in range(1, cols + 1):
-            choices = [total_costs[i - 1, j - 1],
-                       total_costs[i - 1, j] + penalty,
-                       total_costs[i, j - 1] + penalty]
-            tb = np.argmin(choices)
-            total_costs[i, j] += choices[tb]
-            phi[i - 1, j - 1] = tb + 1
-
-    total_costs = total_costs[1:, 1:]
-    phi = phi[1:, 1:]
-
-    if gutter == 0:
-        i, j = rows - 1, cols - 1
-    else:
-        best_top_pt = np.argmin(total_costs[-1, :int(G * cols)])
-        best_right_pt = np.argmin(total_costs[:int(G * rows), -1])
-
-        if total_costs[-1, best_top_pt] < total_costs[best_right_pt, -1]:
-            i, j = rows - 1, best_top_pt
+    # Traceback from bottom-right (r-1,c-1) to (0,0)
+    i = r - 1
+    j = c - 1
+    p = [i]
+    q = [j]
+    while i > 0 or j > 0:
+        if i == 0:
+            j -= 1
+        elif j == 0:
+            i -= 1
         else:
-            i, j = best_right_pt, cols - 1
-
-    p, q = [i], [j]
-    while i > 0 and j > 0:
-        tb = phi[i - 1, j - 1]
-        if tb == 1:
-            i -= 1
-            j -= 1
-        elif tb == 2:
-            i -= 1
-        elif tb == 3:
-            j -= 1
+            tb = phi[i, j]
+            if tb == 1:
+                i -= 1
+                j -= 1
+            elif tb == 2:
+                i -= 1
+            elif tb == 3:
+                j -= 1
+            else:
+                raise RuntimeError("bad traceback")
         p.insert(0, i)
         q.insert(0, j)
 
-    return np.array(p[1:]), np.array(q[1:]), total_costs, phi
-
+    D = D[1:r+1, 1:c+1]
+    return np.asarray(p, dtype=int), np.asarray(q, dtype=int), D
 
 def gh(v1, i1, v2, i2, domain, frac=0.5):
     """
@@ -294,87 +200,37 @@ def orio_simmx(M, D):
 
     return S
 
-
-def simmx(A, B):
-    """
-    Calculate a similarity matrix between feature matrices A and B.
-
-    Parameters
-    ----------
-    A : np.ndarray
-        The first feature matrix, where each row represents a sample and each column represents a feature.
-
-    B : np.ndarray, optional
-        The second feature matrix. If not provided, B will be set to A, allowing for self-similarity calculation.
-
-    Returns
-    -------
-    np.ndarray
-        The similarity matrix between A and B, where the element at (i, j) represents the similarity
-        between the i-th sample of A and the j-th sample of B.
-    """
-    A = A.values if isinstance(A, pd.DataFrame) else A
-    B = B.values if isinstance(B, pd.DataFrame) else B
-
-    EA = np.sqrt(np.sum(A**2, axis=0))
-    EB = np.sqrt(np.sum(B**2, axis=0))
-
-    M = (A.T @ B) / (EA[:, None] @ EB[None, :])
-
-    return M
-
-
 def maptimes(t, intime, outtime):
     """
-    Map onset/offset times using linear interpolation from `intime` to `outtime`.
-
-    Parameters
-    ----------
-    t : np.ndarray of shape (N, 2)
-        Each row contains [onset, offset].
-
-    Returns
-    -------
-    np.ndarray of shape (N, 2)
-        Mapped onset and offset times.
+    Map onset/offset times using a monotone linear interpolation from `intime` to `outtime`.
+    Handles duplicate `intime` entries (DTW path repeats) by averaging their `outtime`.
     """
-    t = np.asarray(t)
-    intime = np.asarray(intime)
-    outtime = np.asarray(outtime)
 
-    sort_idx = np.argsort(intime)
-    intime = intime[sort_idx]
-    outtime = outtime[sort_idx]
+    t = np.asarray(t, dtype=float)
+    intime = np.asarray(intime, dtype=float)
+    outtime = np.asarray(outtime, dtype=float)
 
-    onset_mapped = np.interp(t[:, 0], intime, outtime, left=outtime[0], right=outtime[-1])
-    offset_mapped = np.interp(t[:, 1], intime, outtime, left=outtime[0], right=outtime[-1])
+    original_shape = t.shape
+    x = t.reshape(-1)
 
-    return np.round(np.stack([onset_mapped, offset_mapped], axis=1), 3)
+    # Sort by intime
+    order = np.argsort(intime)
+    intime = intime[order]
+    outtime = outtime[order]
 
+    # Collapse duplicate intime values by averaging outtime
+    uniq, inv = np.unique(intime, return_inverse=True)
+    out_sum = np.bincount(inv, weights=outtime)
+    out_cnt = np.bincount(inv)
+    out_u = out_sum / np.maximum(out_cnt, 1)
 
-    # """
-    # Linearly interpolate output times for arbitrary t values using
-    # the mapping defined by (intime, outtime).
-    # """
-    # return np.interp(t, intime, outtime)
+    # Enforce nondecreasing outtime (DTW should be monotone; this prevents tiny inversions)
+    out_u = np.maximum.accumulate(out_u)
 
-    # More to MATLAB function
-    # t = np.asarray(t)
-    # intime = np.asarray(intime)
-    # outtime = np.asarray(outtime)
+    # Linear interpolation with endpoint clamping
+    y = np.interp(x, uniq, out_u, left=out_u[0], right=out_u[-1])
 
-    # original_shape = t.shape
-    # t = t.flatten()
-
-    # u = np.empty_like(t, dtype=outtime.dtype)
-
-    # for i, ti in enumerate(t):
-    #     idx = np.searchsorted(intime, ti, side='right')
-    #     if idx >= len(outtime):
-    #         idx = len(outtime) - 1
-    #     u[i] = outtime[idx]
-
-    # return u.reshape(original_shape)
+    return y.reshape(original_shape)
 
 
 # These are the new functions to replace calculate_f0_est
@@ -423,38 +279,18 @@ def f0_est_weighted_sum(x, f, f0i, fMax=20000, fThresh=None):
     x2 = np.abs(x) ** 2
     np.isnan(x2)
     wNum = np.zeros_like(x2)
-    wDen = np.zeros_like(x2)
-    # print('-----')
-    # print('fMax', fMax)
-    # print('f0i', f0i)
-
-    # PRINT TIMESTAMP OF CHUNK, what could be happening is audio is shorter (or longer)
-    # than notated seconds in column 1 of CSV
-
-    # This doesn't really work...
-    # f0i = np.nan_to_num(f0i, nan=0.0)
-    # valid_f0i = f0i[f0i > 0]  # Only use positive values
-    # if valid_f0i.size == 0:
-    #     maxI = 1  # Safe default value
-    # else:
-    #     maxI = np.max(fMax / valid_f0i)
-
-    # Use conditionals to check for full array of nan's
-    # Remove nan's entirely
-    # If f0i.size == 0, then maxI = 1
+    wDen = np.zeros_like(x2)    
 
     maxI = np.max(fMax / f0i[f0i > 0])
     strips = []
-
-    # print('f0i updated', f0i)
 
     for i in range(1, int(maxI) + 1):
         mask = np.abs(f - (f0i * i)) < fThresh
         strip = x2 * mask
         strips.append(strip)
 
-        wNum += 1 / i * strip  # .toarray()
-        wDen += strip  # .toarray()
+        wNum += 1 / i * strip
+        wDen += strip
 
     wNum *= (f < fMax)
     wDen *= (f < fMax)
@@ -465,7 +301,7 @@ def f0_est_weighted_sum(x, f, f0i, fMax=20000, fThresh=None):
     return f0, pow, strips
 
 
-def f0_est_weighted_sum_spec(noteStart_s, noteEnd_s, midiNote, y, sr, useIf=True):
+def f0_est_weighted_sum_spec(noteStart_s, noteEnd_s, midiNote, freqs, D, sr, useIf=True):
     """
     Calculate F0, power, and spectrum for a single note.
 
@@ -507,13 +343,7 @@ def f0_est_weighted_sum_spec(noteStart_s, noteEnd_s, midiNote, y, sr, useIf=True
     win_s = 0.064
     win = round(win_s * sr)
     hop = round(win / 8)
-
-
-    # load if gram
-    # This should be moved outside of f0_est and passed in
-    # Also remove audio_file, redundant
-    freqs, times, D = librosa.reassigned_spectrogram(
-        y=y, sr=sr, hop_length=hop)
+    
 
    # indices for indexing into ifgram (D)
     noteStart_hop = int(np.floor(noteStart_s * sr / hop))
@@ -551,104 +381,146 @@ def f0_est_weighted_sum_spec(noteStart_s, noteEnd_s, midiNote, y, sr, useIf=True
     return f0, p, t, M, xf
 
 
-def durations_from_midi_ticks(filename):
+# Internal utility function, no documentation
+def trim_silences(nmat_dict, y, sr, rms_thresh_db=-40.0, pad=0.25):       
     """
-    Extract note durations from a MIDI file using MIDI ticks. This function processes a MIDI file, calculates note onset and offset times 
-    based on MIDI ticks and tempo, and returns the duration matrix (nmat). It handles 
-    tempo changes and computes times by converting MIDI ticks to seconds.
-
-    Assumes a default pulses-per-quarter-note (PPQN) value of 96.
+    Remove or clamp note events in a note matrix that fall outside the active
+    audio region, as determined by an RMS energy threshold.
 
     Parameters
     ----------
-    filename : str
-        Path to the MIDI file to be processed.
+    nmat_dict : pd.DataFrame
+        Note matrix dictionary keyed by part name.
+
+    y : np.ndarray
+        Audio time series at sample rate ``sr``.
+
+    sr : int
+        Sample rate of ``y`` in Hz.
+
+    rms_thresh_db : float, optional
+        RMS energy threshold in dBFS below which frames are considered silent.
+        Default is ``-40.0``.
+
+    pad : float, optional
+        Reserved for future use. Currently unused. Default is ``0.25``.
 
     Returns
     -------
-    np.ndarray
-        A numpy array where each row contains the start and end times of notes 
-        (in seconds) based on MIDI ticks and tempo changes.
-
+    nmat_dict : pd.DataFrame
+        The input dictionary with each part's DataFrame trimmed in-place to the
+        active audio window.
     """
+    # Compute RMS and active time window
+    rms = librosa.feature.rms(y=y)[0]
+    times = librosa.frames_to_time(np.arange(len(rms)), sr=sr)
+    active = rms > librosa.db_to_amplitude(rms_thresh_db)    
 
-    # symbolic.py converts the files beforehand
-    mid = mido.MidiFile(filename)
+    if not np.any(active):
+        raise ValueError("No active audio found above threshold")
 
-    nmat = []
+    first_active_idx = np.argmax(active)
+    last_active_idx = len(active) - 1 - np.argmax(active[::-1])
+    start_trim = times[first_active_idx]
+    end_trim = times[last_active_idx]
 
-    # Set PPQN to 96
-    ppqn = 96
+    for part, df in nmat_dict.items():
+        new_rows = []
+        for _, row in df.iterrows():
+            onset = row['ONSET_SEC']
+            offset = row['OFFSET_SEC']
 
-    # Convert ticks per beat to seconds per tick
-    seconds_per_tick = 60 / (500000 / ppqn)
+            # Discard completely silent notes
+            if offset < start_trim or onset > end_trim:
+                continue
 
-    # Default tempo in microseconds per quarter note (500000 µs = 120 BPM)
-    current_tempo = 500000
+            # Clamp only edges
+            new_onset = onset if onset >= start_trim else start_trim
+            new_offset = offset if offset <= end_trim else end_trim
 
-    for track in mid.tracks:
-        cum_time = 0
+            if new_offset > new_onset:
+                new_row = row.copy()
+                new_row['ONSET_SEC'] = new_onset
+                new_row['OFFSET_SEC'] = new_offset
+                if 'DURATION' in row:
+                    new_row['DURATION'] = new_offset - new_onset
+                new_rows.append(new_row)
 
-        for msg in track:
-            cum_time += msg.time
+        nmat_dict[part] = pd.DataFrame(new_rows, columns=df.columns)
 
-            if msg.type == 'set_tempo':
-                current_tempo = msg.tempo
-                # Update seconds per tick based on new tempo
-                seconds_per_tick = current_tempo / (1_000_000 * ppqn)
+    return nmat_dict
 
-            if msg.type == 'note_on' and msg.velocity > 0:
-                note = msg.note
-                velocity = msg.velocity
-                start_time = cum_time * seconds_per_tick
-                nmat.append([start_time, 0])
-
-            if msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                for event in reversed(nmat):
-                    if event[1] == 0 and event[0] <= cum_time * seconds_per_tick:
-                        end_time = cum_time * seconds_per_tick
-                        event[1] = end_time
-                        break
-
-    # Convert nmat to np.array and return only the 3rd and 4th columns
-    return np.array(nmat)
-
-
-def load_audiofile(audio_file):
+# Internal utility function, no documentation
+# Merges grace notes and odd polyrhythmic values into one voice and orders them
+def merge_grace_notes(nmat, offset=0.025):
     """
-    Loads file for analysis. Currently only the WAV file format is allowed.  AIFF, MP3, etc. must be converted prior.
+    Merge grace-note sub-parts back into their parent voice and resolve any
+    resulting onset overlaps.
 
     Parameters
     ----------
-    audio_file : str
-        The path to the wav file to be loaded.
+    nmat : pd.DataFrame
+        Note matrix dictionary keyed by part name.
+
+    offset : float, optional
+        Time in seconds added to the ``ONSET_SEC`` and ``OFFSET_SEC`` of every
+        grace-note sub-part before merging. Default is ``0.025``.
 
     Returns
     -------
-    audio_data : The loaded wav file as a numpy array.
-    sr : The original sample rate of the audio file.
-
+    nmat : dict of str → pd.DataFrame
+        The updated note matrix with all grace-note sub-parts folded into their
+        respective base parts and removed as separate keys.
     """
+    base_parts = {}
+    for part in list(nmat.keys()):
+        base = part.split(":")[0]
+        base_parts.setdefault(base, []).append(part)
 
-    with wave.open(audio_file, 'rb') as wf:
-        sr = wf.getframerate()
-        n_channels = wf.getnchannels()
-        n_frames = wf.getnframes()
+    for base, parts in base_parts.items():
+        if len(parts) == 1:
+            continue  # no merging needed
 
-        # Read the raw audio data
-        raw_audio = wf.readframes(n_frames)
+        dfs = []
+        for part in parts:
+            df = nmat[part].copy()
+            if part != base:
+                # Apply offset to ONSET_SEC (time in seconds), not ONSET (beats)
+                df['ONSET_SEC'] += offset
+                df['OFFSET_SEC'] += offset
+            dfs.append(df)
 
-        # Convert raw audio to numpy array
-        audio_data = np.frombuffer(raw_audio, dtype=np.int16)
+        # Sort by ONSET_SEC (time in seconds) instead of ONSET (beats)
+        merged = pd.concat(dfs).sort_values('ONSET_SEC').copy()
 
-        # If stereo, reshape to (n_frames, n_channels)
-        if n_channels > 1:
-            audio_data = audio_data.reshape(-1, n_channels)
+        # Remove duplicate indices that might cause reindexing issues
+        merged = merged[~merged.index.duplicated(keep='first')]
 
-        # Flatten to a single channel if needed
-        audio_data = audio_data.flatten()
+        # Recalculate DURATION in beats based on the new ordering
+        # But preserve the original ONSET_SEC and OFFSET_SEC timing
+        # Only update DURATION to match the time-based values
+        merged['DURATION'] = merged['OFFSET_SEC'] - merged['ONSET_SEC']
 
-        # Convert to float32 in range [-1.0, 1.0]
-        audio_data = audio_data.astype(np.float32) / 32768.0
+        # Ensure minimum duration to prevent zero-duration notes
+        merged['DURATION'] = merged['DURATION'].clip(lower=0.01)  # Minimum 10ms
+        merged['OFFSET_SEC'] = merged['ONSET_SEC'] + merged['DURATION']
 
-        return audio_data, sr
+        # Ensure no overlapping notes by adjusting onset times if necessary
+        merged = merged.sort_values('ONSET_SEC')
+        for i in range(1, len(merged)):
+            prev_offset = merged.iloc[i-1]['OFFSET_SEC']
+            curr_onset = merged.iloc[i]['ONSET_SEC']
+            if curr_onset < prev_offset:
+                # Adjust current onset to avoid overlap
+                merged.iloc[i, merged.columns.get_loc('ONSET_SEC')] = prev_offset + 0.001
+                merged.iloc[i, merged.columns.get_loc('OFFSET_SEC')] = merged.iloc[i]['ONSET_SEC'] + merged.iloc[i]['DURATION']
+
+        # Replace in dict
+        nmat[base] = merged
+        for part in parts:
+            if part != base:
+                del nmat[part]
+
+    return nmat    
+
+

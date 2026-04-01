@@ -6,8 +6,7 @@ import sys
 import importlib
 
 short_version = "0.0"
-version = "0.0.4"
-
+version = "0.0.6"
 
 def __get_mod_version(modname):
     try:
@@ -28,15 +27,14 @@ def show_versions() -> None:
     """Return the version information for all pyampact dependencies."""
     core_deps = [
         'music21==9.1.0',
-        'pandas==2.2.0',
-        'pyarrow==15.0.0',
-        'numpy==1.24.3',
+        'pandas==2.2.2',
+        'pyarrow>=15.0.0',
+        'numpy>=1.26.4,<2.0',
         'requests==2.31.0',
-        'pytest==7.4.3',
-        'scipy==1.11.1',
-        'librosa==0.10.0.post2',
-        "mido == 1.3.2",
-        'setuptools>=48',
+        'scipy>=1.11.4',
+        'librosa>=0.10.1',
+        'praat-parselmouth==0.4.3',
+        'pywavelets>=1.4.1',
     ]
 
     print("INSTALLED VERSIONS")
